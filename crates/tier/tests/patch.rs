@@ -1,0 +1,996 @@
+#![cfg(feature = "derive")]
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
+use serde::{Deserialize, Serialize};
+#[cfg(feature = "toml")]
+use std::fs;
+use std::sync::Arc;
+#[cfg(feature = "toml")]
+use tempfile::tempdir;
+
+#[cfg(feature = "toml")]
+use tier::FileSource;
+use tier::{ConfigLoader, Layer, Patch, TierPatch};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct PatchConfig {
+    server: PatchServer,
+    db: PatchDb,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct PatchServer {
+    host: String,
+    port: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct PatchDb {
+    token: Option<String>,
+}
+
+impl Default for PatchConfig {
+    fn default() -> Self {
+        Self {
+            server: PatchServer {
+                host: "127.0.0.1".to_owned(),
+                port: 3000,
+            },
+            db: PatchDb {
+                token: Some("default-token".to_owned()),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, TierPatch, Default)]
+struct ServerPatch {
+    port: Option<u16>,
+}
+
+#[derive(Debug, Clone, TierPatch, Default)]
+struct AppPatch {
+    #[tier(nested)]
+    server: Option<ServerPatch>,
+    #[tier(path = "db.token")]
+    token: Patch<Option<String>>,
+}
+
+#[derive(Debug, Clone, TierPatch, Default)]
+struct CheckedPathPatch {
+    #[tier(path_expr = tier::path!(PatchConfig.db.token))]
+    token: Patch<Option<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct PatternConfig {
+    services: std::collections::BTreeMap<String, PatternService>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct PatternService {
+    token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct RawPathConfig {
+    proxy: RawProxyConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct RawProxyConfig {
+    r#type: String,
+}
+
+impl Default for RawPathConfig {
+    fn default() -> Self {
+        Self {
+            proxy: RawProxyConfig {
+                r#type: "http".to_owned(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, TierPatch, Default)]
+struct RawPathPatch {
+    #[tier(path_expr = tier::path!(RawPathConfig.proxy.r#type))]
+    kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct RawPatternConfig {
+    services: std::collections::BTreeMap<String, RawPatternService>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct RawPatternService {
+    r#type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct OptionalPatternConfig {
+    services: Option<std::collections::BTreeMap<String, PatternService>>,
+}
+
+#[derive(Debug)]
+struct BoxedPatternConfig {
+    services: Box<[PatternService; 1]>,
+}
+
+#[derive(Debug)]
+struct SharedPatternConfig {
+    services: Arc<Vec<PatternService>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct ArrayPatchConfig {
+    users: Vec<PatternService>,
+}
+
+impl Default for ArrayPatchConfig {
+    fn default() -> Self {
+        Self {
+            users: vec![PatternService {
+                token: "seed".to_owned(),
+            }],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct NumericObjectKeyConfig {
+    value: serde_json::Value,
+}
+
+impl Default for NumericObjectKeyConfig {
+    fn default() -> Self {
+        Self {
+            value: serde_json::json!({
+                "0": {
+                    "password": "seed-secret"
+                }
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, TierPatch, Default)]
+struct OverlappingPatch {
+    #[tier(path = "db.token")]
+    token: Option<String>,
+    db: Option<PatchDb>,
+}
+
+#[derive(Debug, Clone, TierPatch, Default)]
+struct DuplicatePathPatch {
+    port: Option<u16>,
+    #[tier(path = "port")]
+    other_port: Option<u16>,
+}
+
+#[derive(Debug, Clone, TierPatch, Default)]
+struct CanonicalDuplicateArrayPatch {
+    #[tier(path = "users[0].name")]
+    first: Option<String>,
+    #[tier(path = "users[00].name")]
+    second: Option<String>,
+}
+
+#[derive(Debug, Clone, TierPatch, Default)]
+struct CanonicalOverlappingArrayPatch {
+    #[tier(path = "users[0]")]
+    first: Option<PatternService>,
+    #[tier(path = "users[00].token")]
+    second: Option<String>,
+}
+
+#[derive(Debug, Clone, TierPatch, Default)]
+struct ArrayItemPatch {
+    #[tier(path = "users.0.token")]
+    token: Option<String>,
+}
+
+#[derive(Debug, Clone, TierPatch, Default)]
+struct NumericObjectKeyPatch {
+    #[tier(path = "value.0.password")]
+    password: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct DeferredArrayShapeConfig {
+    users: serde_json::Value,
+}
+
+impl Default for DeferredArrayShapeConfig {
+    fn default() -> Self {
+        Self {
+            users: serde_json::json!({}),
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, TierPatch, Default)]
+struct DeferredArrayShapePatch {
+    users: Patch<serde_json::Value>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, TierPatch, Default)]
+struct DeferredArrayItemPatch {
+    #[tier(path = "users.0.token")]
+    token: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, TierPatch, Default)]
+struct DeferredExplicitArrayItemPatch {
+    #[tier(path = "users[0].token")]
+    token: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct DeferredObjectShapeConfig {
+    users: serde_json::Value,
+}
+
+impl Default for DeferredObjectShapeConfig {
+    fn default() -> Self {
+        Self {
+            users: serde_json::json!({ "existing": true }),
+        }
+    }
+}
+
+#[test]
+fn typed_patches_can_override_nested_fields_and_clear_optionals() {
+    let patch = AppPatch {
+        server: Some(ServerPatch { port: Some(9001) }),
+        token: Patch::set(None),
+    };
+
+    let loaded = ConfigLoader::new(PatchConfig::default())
+        .patch("typed-patch", &patch)
+        .expect("patch layer is valid")
+        .load()
+        .expect("config loads");
+
+    assert_eq!(loaded.server.port, 9001);
+    assert_eq!(loaded.db.token, None);
+    assert!(
+        loaded
+            .report()
+            .explain("server.port")
+            .expect("server.port explanation")
+            .steps
+            .last()
+            .expect("latest step")
+            .source
+            .to_string()
+            .contains("typed-patch")
+    );
+}
+
+#[test]
+fn layer_can_be_constructed_from_a_typed_patch() {
+    let patch = AppPatch {
+        server: Some(ServerPatch { port: Some(7000) }),
+        token: Patch::Unset,
+    };
+
+    let layer = Layer::from_patch("manual-patch", &patch).expect("layer from patch");
+    let loaded = ConfigLoader::new(PatchConfig::default())
+        .layer(layer)
+        .load()
+        .expect("config loads");
+
+    assert_eq!(loaded.server.port, 7000);
+    assert_eq!(loaded.db.token.as_deref(), Some("default-token"));
+}
+
+#[test]
+fn standalone_patch_layers_preserve_numeric_object_keys_without_shape_context() {
+    let layer = Layer::from_patch(
+        "manual-patch",
+        &NumericObjectKeyPatch {
+            password: Some("patched-secret".to_owned()),
+        },
+    )
+    .expect("layer from patch");
+
+    let loaded = ConfigLoader::new(NumericObjectKeyConfig::default())
+        .layer(layer)
+        .load()
+        .expect("config loads");
+
+    assert_eq!(
+        loaded.value,
+        serde_json::json!({
+            "0": {
+                "password": "patched-secret"
+            }
+        })
+    );
+    assert!(loaded.report().explain("value[0].password").is_none());
+    let explanation = loaded
+        .report()
+        .explain("value.0.password")
+        .expect("numeric object-key explanation");
+    assert_eq!(explanation.path, "value.0.password");
+}
+
+#[test]
+fn checked_path_macros_can_drive_sparse_patches() {
+    assert_eq!(tier::path!(PatchConfig.db.token), "db.token");
+    assert_eq!(
+        tier::path_pattern!(PatternConfig.services.*.token),
+        "services.*.token"
+    );
+
+    let loaded = ConfigLoader::new(PatchConfig::default())
+        .patch(
+            "checked-patch",
+            &CheckedPathPatch {
+                token: Patch::set(Some("from-checked-path".to_owned())),
+            },
+        )
+        .expect("patch layer is valid")
+        .load()
+        .expect("config loads");
+
+    assert_eq!(loaded.db.token.as_deref(), Some("from-checked-path"));
+}
+
+#[test]
+fn checked_path_macros_strip_raw_identifier_prefixes() {
+    assert_eq!(tier::path!(RawPathConfig.proxy.r#type), "proxy.type");
+    assert_eq!(
+        tier::path_pattern!(RawPatternConfig.services.*.r#type),
+        "services.*.type"
+    );
+
+    let loaded = ConfigLoader::new(RawPathConfig::default())
+        .patch(
+            "raw-path-patch",
+            &RawPathPatch {
+                kind: Some("https".to_owned()),
+            },
+        )
+        .expect("patch layer is valid")
+        .load()
+        .expect("config loads");
+
+    assert_eq!(loaded.proxy.r#type, "https");
+}
+
+#[test]
+fn checked_pattern_paths_support_optional_collections() {
+    assert_eq!(
+        tier::path_pattern!(OptionalPatternConfig.services.*.token),
+        "services.*.token"
+    );
+}
+
+#[test]
+fn checked_pattern_paths_support_boxed_and_shared_collections() {
+    assert_eq!(
+        tier::path_pattern!(BoxedPatternConfig.services.*.token),
+        "services.*.token"
+    );
+    assert_eq!(
+        tier::path_pattern!(SharedPatternConfig.services.*.token),
+        "services.*.token"
+    );
+}
+
+#[test]
+fn typed_patches_keep_existing_array_index_semantics_when_shape_is_an_array() {
+    let loaded = ConfigLoader::new(ArrayPatchConfig::default())
+        .patch(
+            "array-patch",
+            &ArrayItemPatch {
+                token: Some("patched-array-token".to_owned()),
+            },
+        )
+        .expect("patch layer is valid")
+        .load()
+        .expect("config loads");
+
+    assert_eq!(loaded.users[0].token, "patched-array-token");
+}
+
+#[test]
+fn typed_patches_preserve_numeric_object_keys_when_defaults_define_object_shape() {
+    let loaded = ConfigLoader::new(NumericObjectKeyConfig::default())
+        .patch(
+            "numeric-object-key-patch",
+            &NumericObjectKeyPatch {
+                password: Some("patched-secret".to_owned()),
+            },
+        )
+        .expect("patch layer is valid")
+        .load()
+        .expect("config loads");
+
+    assert_eq!(
+        loaded.value,
+        serde_json::json!({
+            "0": {
+                "password": "patched-secret"
+            }
+        })
+    );
+    assert!(loaded.report().explain("value[0].password").is_none());
+    let explanation = loaded
+        .report()
+        .explain("value.0.password")
+        .expect("numeric object-key explanation");
+    assert_eq!(explanation.path, "value.0.password");
+}
+
+#[test]
+fn typed_patches_preserve_numeric_object_keys_when_prior_layers_define_object_shape() {
+    let loaded = ConfigLoader::new(NumericObjectKeyConfig {
+        value: serde_json::json!({}),
+    })
+    .layer(
+        Layer::custom(
+            "shape-layer",
+            serde_json::json!({
+                "value": {
+                    "0": {
+                        "password": "seed-secret"
+                    }
+                }
+            }),
+        )
+        .expect("shape layer"),
+    )
+    .patch(
+        "numeric-object-key-patch",
+        &NumericObjectKeyPatch {
+            password: Some("patched-secret".to_owned()),
+        },
+    )
+    .expect("patch layer is valid")
+    .load()
+    .expect("config loads");
+
+    assert_eq!(
+        loaded.value,
+        serde_json::json!({
+            "0": {
+                "password": "patched-secret"
+            }
+        })
+    );
+}
+
+#[cfg(feature = "toml")]
+#[test]
+fn typed_patches_preserve_array_shape_from_prior_file_layers() {
+    let dir = tempdir().expect("temporary directory");
+    let path = dir.path().join("app.toml");
+    fs::write(&path, "users = [{ token = \"seed-token\" }]\n").expect("write config file");
+
+    let loaded = ConfigLoader::new(DeferredArrayShapeConfig::default())
+        .with_file(FileSource::new(&path))
+        .patch(
+            "typed-patch",
+            &DeferredArrayItemPatch {
+                token: Some("patched-token".to_owned()),
+            },
+        )
+        .expect("patch layer is valid")
+        .load()
+        .expect("config loads");
+
+    assert_eq!(
+        loaded.users,
+        serde_json::json!([{ "token": "patched-token" }])
+    );
+}
+
+#[test]
+fn typed_patches_preserve_explicit_bracket_arrays_for_deferred_values() {
+    let loaded = ConfigLoader::new(DeferredArrayShapeConfig::default())
+        .patch(
+            "typed-patch",
+            &DeferredExplicitArrayItemPatch {
+                token: Some("patched-token".to_owned()),
+            },
+        )
+        .expect("patch layer is valid")
+        .load()
+        .expect("config loads");
+
+    assert_eq!(
+        loaded.users,
+        serde_json::json!([{ "token": "patched-token" }])
+    );
+}
+
+#[test]
+fn typed_patches_reject_explicit_brackets_after_known_object_shapes() {
+    let error = ConfigLoader::new(DeferredObjectShapeConfig::default())
+        .patch(
+            "typed-patch",
+            &DeferredExplicitArrayItemPatch {
+                token: Some("patched-token".to_owned()),
+            },
+        )
+        .expect("patch layer is valid")
+        .load()
+        .expect_err("explicit bracket syntax should not rewrite a non-empty object shape");
+
+    let message = error.to_string();
+    assert!(message.contains("typed-patch"));
+    assert!(message.contains("users[0].token") || message.contains("users.0.token"));
+    assert!(message.contains("array syntax"));
+}
+
+#[cfg(feature = "clap")]
+#[test]
+fn typed_clap_overrides_preserve_array_shape_from_prior_typed_clap_layers() {
+    let loaded = ConfigLoader::new(DeferredArrayShapeConfig::default())
+        .clap_overrides(&DeferredArrayShapePatch {
+            users: Patch::set(serde_json::json!([{ "token": "seed-token" }])),
+        })
+        .expect("shape-defining typed clap overrides are valid")
+        .clap_overrides(&DeferredArrayItemPatch {
+            token: Some("patched-token".to_owned()),
+        })
+        .expect("follow-up typed clap overrides are valid")
+        .load()
+        .expect("config loads");
+
+    assert_eq!(
+        loaded.users,
+        serde_json::json!([{ "token": "patched-token" }])
+    );
+    let explanation = loaded
+        .report()
+        .explain("users[0].token")
+        .expect("users[0].token explanation");
+    assert_eq!(explanation.path, "users.0.token");
+}
+
+#[cfg(all(feature = "clap", feature = "toml"))]
+#[test]
+fn typed_clap_overrides_preserve_array_shape_from_prior_file_layers() {
+    let dir = tempdir().expect("temporary directory");
+    let path = dir.path().join("app.toml");
+    fs::write(&path, "users = [{ token = \"seed-token\" }]\n").expect("write config file");
+
+    let loaded = ConfigLoader::new(DeferredArrayShapeConfig::default())
+        .with_file(FileSource::new(&path))
+        .clap_overrides(&DeferredArrayItemPatch {
+            token: Some("patched-token".to_owned()),
+        })
+        .expect("typed clap overrides are valid")
+        .load()
+        .expect("config loads");
+
+    assert_eq!(
+        loaded.users,
+        serde_json::json!([{ "token": "patched-token" }])
+    );
+}
+
+#[cfg(feature = "clap")]
+#[test]
+fn typed_clap_overrides_preserve_array_shape_from_prior_env_layers() {
+    let loaded = ConfigLoader::new(DeferredArrayShapeConfig::default())
+        .env(
+            tier::EnvSource::from_pairs([("APP__USERS", r#"[{"token":"seed-token"}]"#)])
+                .prefix("APP"),
+        )
+        .clap_overrides(&DeferredArrayItemPatch {
+            token: Some("patched-token".to_owned()),
+        })
+        .expect("typed clap overrides are valid")
+        .load()
+        .expect("config loads");
+
+    assert_eq!(
+        loaded.users,
+        serde_json::json!([{ "token": "patched-token" }])
+    );
+}
+
+#[test]
+fn overlapping_parent_and_child_patch_paths_are_rejected() {
+    let error = Layer::from_patch(
+        "overlapping-patch",
+        &OverlappingPatch {
+            token: Some("child".to_owned()),
+            db: Some(PatchDb {
+                token: Some("parent".to_owned()),
+            }),
+        },
+    )
+    .expect_err("overlapping patch paths should not be order-dependent");
+
+    let message = error.to_string();
+    assert!(message.contains("overlapping-patch"));
+    assert!(message.contains("db"));
+    assert!(message.contains("db.token"));
+    assert!(message.contains("overlap"));
+}
+
+#[test]
+fn duplicate_patch_paths_are_rejected() {
+    let error = Layer::from_patch(
+        "duplicate-patch",
+        &DuplicatePathPatch {
+            port: Some(8080),
+            other_port: Some(9090),
+        },
+    )
+    .expect_err("duplicate patch paths should be rejected");
+
+    let message = error.to_string();
+    assert!(message.contains("duplicate-patch"));
+    assert!(message.contains("port"));
+    assert!(message.contains("duplicate patch path"));
+}
+
+#[test]
+fn canonical_duplicate_array_patch_paths_are_rejected() {
+    let error = Layer::from_patch(
+        "duplicate-array-patch",
+        &CanonicalDuplicateArrayPatch {
+            first: Some("first".to_owned()),
+            second: Some("second".to_owned()),
+        },
+    )
+    .expect_err("canonical duplicate array paths should be rejected");
+
+    let message = error.to_string();
+    assert!(message.contains("duplicate-array-patch"));
+    assert!(message.contains("users.0.name"));
+    assert!(message.contains("duplicate patch path"));
+}
+
+#[test]
+fn canonical_overlapping_array_patch_paths_are_rejected() {
+    let error = Layer::from_patch(
+        "overlapping-array-patch",
+        &CanonicalOverlappingArrayPatch {
+            first: Some(PatternService {
+                token: "parent".to_owned(),
+            }),
+            second: Some("child".to_owned()),
+        },
+    )
+    .expect_err("canonical overlapping array paths should be rejected");
+
+    let message = error.to_string();
+    assert!(message.contains("overlapping-array-patch"));
+    assert!(message.contains("users.0"));
+    assert!(message.contains("users.0.token"));
+    assert!(message.contains("overlap"));
+}
+
+#[test]
+fn oversized_array_patch_indices_are_rejected_without_panicking() {
+    struct OversizedIndexPatch;
+
+    impl TierPatch for OversizedIndexPatch {
+        fn write_layer(
+            &self,
+            builder: &mut tier::patch::PatchLayerBuilder,
+            _prefix: &str,
+        ) -> Result<(), tier::ConfigError> {
+            let path = format!("users[{}].token", "9".repeat(64));
+            builder.insert_value(&path, serde_json::json!("patched-token"))
+        }
+    }
+
+    let error = Layer::from_patch("oversized-array-patch", &OversizedIndexPatch)
+        .expect_err("oversized patch indices should fail fast");
+
+    let tier::ConfigError::InvalidPatch {
+        name,
+        path,
+        message,
+    } = error
+    else {
+        panic!("expected invalid patch error");
+    };
+    assert_eq!(name, "oversized-array-patch");
+    assert!(path.starts_with("users["));
+    assert!(message.contains("fit in usize"));
+}
+
+#[test]
+fn bounded_array_patch_indices_are_rejected_before_allocating() {
+    struct BoundedOversizedIndexPatch;
+
+    impl TierPatch for BoundedOversizedIndexPatch {
+        fn write_layer(
+            &self,
+            builder: &mut tier::patch::PatchLayerBuilder,
+            _prefix: &str,
+        ) -> Result<(), tier::ConfigError> {
+            builder.insert_value("users[1048576].token", serde_json::json!("patched-token"))
+        }
+    }
+
+    let error = Layer::from_patch("bounded-oversized-array-patch", &BoundedOversizedIndexPatch)
+        .expect_err("oversized patch indices should fail before allocating sparse arrays");
+
+    let tier::ConfigError::InvalidPatch {
+        name,
+        path,
+        message,
+    } = error
+    else {
+        panic!("expected invalid patch error");
+    };
+    assert_eq!(name, "bounded-oversized-array-patch");
+    assert_eq!(path, "users[1048576].token");
+    assert!(message.contains("array indices"));
+    assert!(message.contains("1048575"));
+}
+
+#[cfg(feature = "clap")]
+mod clap_bridge {
+    use clap::{Args, Parser, Subcommand};
+
+    use super::*;
+
+    #[derive(Debug, Clone, Args, TierPatch, Default)]
+    struct ServerCli {
+        #[arg(long)]
+        port: Option<u16>,
+    }
+
+    #[derive(Debug, Clone, Parser, TierPatch)]
+    struct AppCli {
+        #[command(flatten)]
+        #[tier(nested)]
+        server: ServerCli,
+        #[arg(long = "db-token")]
+        #[tier(path_expr = tier::path!(PatchConfig.db.token))]
+        token: Option<String>,
+    }
+
+    #[derive(Debug, Clone, Args, TierPatch, Default)]
+    struct ConfigArgs {
+        #[arg(long)]
+        #[tier(path = "server.port")]
+        port: Option<u16>,
+        #[arg(long = "db-token")]
+        #[tier(path_expr = tier::path!(PatchConfig.db.token))]
+        token: Option<String>,
+    }
+
+    #[derive(Debug, Clone, TierPatch)]
+    enum CommandPatch {
+        #[tier(path = "server")]
+        Serve(ServerCli),
+        RotateCredentials {
+            #[tier(path_expr = tier::path!(PatchConfig.db.token))]
+            token: Option<String>,
+        },
+        Inspect,
+    }
+
+    #[derive(Debug, Clone, Subcommand)]
+    enum Command {
+        Serve {
+            #[arg(last = true)]
+            trailing: Vec<String>,
+        },
+        Inspect,
+    }
+
+    #[derive(Debug, Clone, Parser)]
+    struct FullCli {
+        #[command(flatten)]
+        config: ConfigArgs,
+        #[command(subcommand)]
+        command: Option<Command>,
+        #[arg(long)]
+        verbose: bool,
+    }
+
+    #[derive(Debug, Clone, Parser, TierPatch)]
+    struct DirectCli {
+        #[arg(long)]
+        #[tier(path = "server.port")]
+        port: Option<u16>,
+        #[arg(long = "db-token")]
+        #[tier(path_expr = tier::path!(PatchConfig.db.token))]
+        token: Option<String>,
+        #[arg(long)]
+        #[tier(skip)]
+        verbose: bool,
+        #[arg(last = true)]
+        #[tier(skip)]
+        trailing: Vec<String>,
+    }
+
+    #[test]
+    fn typed_clap_structs_can_apply_last_layer_overrides() {
+        let cli = AppCli::parse_from(["app", "--port", "8123", "--db-token", "from-cli"]);
+
+        let loaded = ConfigLoader::new(PatchConfig::default())
+            .clap_overrides(&cli)
+            .expect("typed clap overrides are valid")
+            .load()
+            .expect("config loads");
+
+        assert_eq!(loaded.server.port, 8123);
+        assert_eq!(loaded.db.token.as_deref(), Some("from-cli"));
+        assert!(
+            loaded
+                .report()
+                .explain("db.token")
+                .expect("db.token explanation")
+                .steps
+                .last()
+                .expect("latest step")
+                .source
+                .to_string()
+                .contains("typed-clap")
+        );
+    }
+
+    #[test]
+    fn typed_clap_overrides_win_over_env_sources() {
+        let cli = AppCli::parse_from(["app", "--port", "8123", "--db-token", "from-cli"]);
+
+        let loaded = ConfigLoader::new(PatchConfig::default())
+            .env(
+                tier::EnvSource::from_pairs([
+                    ("APP__SERVER__PORT", "9000"),
+                    ("APP__DB__TOKEN", "from-env"),
+                ])
+                .prefix("APP"),
+            )
+            .clap_overrides(&cli)
+            .expect("typed clap overrides are valid")
+            .load()
+            .expect("config loads");
+
+        assert_eq!(loaded.server.port, 8123);
+        assert_eq!(loaded.db.token.as_deref(), Some("from-cli"));
+        let explanation = loaded
+            .report()
+            .explain("server.port")
+            .expect("server.port explanation");
+        let port_step = explanation.steps.last().expect("latest step");
+        assert!(port_step.source.to_string().contains("typed-clap"));
+    }
+
+    #[test]
+    fn typed_clap_overrides_win_over_raw_args_sources() {
+        let cli = AppCli::parse_from(["app", "--port", "8123", "--db-token", "from-cli"]);
+
+        let loaded = ConfigLoader::new(PatchConfig::default())
+            .args(tier::ArgsSource::from_args([
+                "tier",
+                "--set",
+                "server.port=9000",
+                "--set",
+                "db.token=from-args",
+            ]))
+            .clap_overrides(&cli)
+            .expect("typed clap overrides are valid")
+            .load()
+            .expect("config loads");
+
+        assert_eq!(loaded.server.port, 8123);
+        assert_eq!(loaded.db.token.as_deref(), Some("from-cli"));
+        let explanation = loaded
+            .report()
+            .explain("server.port")
+            .expect("server.port explanation");
+        let port_step = explanation.steps.last().expect("latest step");
+        assert!(port_step.source.to_string().contains("typed-clap"));
+    }
+
+    #[test]
+    fn typed_patch_enums_support_tuple_and_named_variants() {
+        let serve_loaded = ConfigLoader::new(PatchConfig::default())
+            .clap_overrides(&CommandPatch::Serve(ServerCli { port: Some(8124) }))
+            .expect("tuple variant patch is valid")
+            .load()
+            .expect("config loads");
+
+        assert_eq!(serve_loaded.server.port, 8124);
+
+        let rotated_loaded = ConfigLoader::new(PatchConfig::default())
+            .clap_overrides(&CommandPatch::RotateCredentials {
+                token: Some("rotated".to_owned()),
+            })
+            .expect("named variant patch is valid")
+            .load()
+            .expect("config loads");
+
+        assert_eq!(rotated_loaded.db.token.as_deref(), Some("rotated"));
+
+        let inspect_loaded = ConfigLoader::new(PatchConfig::default())
+            .clap_overrides(&CommandPatch::Inspect)
+            .expect("unit variant patch is valid")
+            .load()
+            .expect("config loads");
+
+        assert_eq!(
+            inspect_loaded.server.port,
+            PatchConfig::default().server.port
+        );
+        assert_eq!(inspect_loaded.db.token, PatchConfig::default().db.token);
+    }
+
+    #[test]
+    fn direct_typed_clap_structs_can_skip_cli_only_fields() {
+        let cli = DirectCli::try_parse_from([
+            "app",
+            "--port",
+            "8125",
+            "--db-token",
+            "from-direct",
+            "--verbose",
+            "--",
+            "serve",
+            "--color=always",
+        ])
+        .expect("CLI parses");
+
+        let loaded = ConfigLoader::new(PatchConfig::default())
+            .clap_overrides(&cli)
+            .expect("typed clap overrides are valid")
+            .load()
+            .expect("config loads");
+
+        assert_eq!(loaded.server.port, 8125);
+        assert_eq!(loaded.db.token.as_deref(), Some("from-direct"));
+        assert!(loaded.report().explain("verbose").is_none());
+        assert!(loaded.report().explain("trailing").is_none());
+    }
+
+    #[test]
+    fn typed_clap_projection_helper_supports_cli_first_models() {
+        let cli = FullCli::try_parse_from([
+            "app",
+            "--port",
+            "8126",
+            "--db-token",
+            "from-projected-cli",
+            "serve",
+            "--",
+            "deploy",
+            "--force",
+        ])
+        .expect("CLI parses");
+
+        let loaded = ConfigLoader::new(PatchConfig::default())
+            .clap_overrides_from(&cli, |cli| &cli.config)
+            .expect("projected typed clap overrides are valid")
+            .load()
+            .expect("config loads");
+
+        assert_eq!(loaded.server.port, 8126);
+        assert_eq!(loaded.db.token.as_deref(), Some("from-projected-cli"));
+        assert!(matches!(
+            cli.command,
+            Some(Command::Serve { ref trailing }) if trailing == &["deploy", "--force"]
+        ));
+    }
+
+    #[test]
+    fn tier_cli_renders_config_errors_for_terminal_output() {
+        let rendered = tier::TierCli::render_error(&tier::ConfigError::DeclaredValidation {
+            errors: tier::ValidationErrors::from_message("db.token", "must not be empty"),
+        });
+
+        assert!(rendered.contains("Configuration validation failed:"));
+        assert!(rendered.contains("- db.token: must not be empty"));
+    }
+}

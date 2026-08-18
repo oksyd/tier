@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    tags:
+      - "[0-9]*.[0-9]*.[0-9]*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Docs
+        run: cargo doc --workspace --no-deps --all-features
+      - name: Package lists exclude lockfiles
+        run: |
+          files="$(cargo package --exclude-lockfile --list -p tier-derive)"
+          ! grep -Fx 'Cargo.lock' <<<"$files"
+          files="$(cargo package --exclude-lockfile --list -p tier)"
+          ! grep -Fx 'Cargo.lock' <<<"$files"
+      - name: Package tier-derive
+        run: cargo package --exclude-lockfile -p tier-derive
+      - name: Package tier
+        run: cargo package --exclude-lockfile -p tier
+
+  feature-checks:
+    name: Check ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            command: cargo check --workspace
+          - name: no-default-features
+            command: cargo check --workspace --no-default-features
+          - name: no-default-examples
+            command: cargo check --workspace --examples --no-default-features
+          - name: all-features
+            command: cargo check --workspace --all-features
+          - name: clap
+            command: cargo check --workspace --no-default-features --features clap
+          - name: derive
+            command: cargo check --workspace --no-default-features --features derive
+          - name: json
+            command: cargo check --workspace --no-default-features --features json
+          - name: schema
+            command: cargo check --workspace --no-default-features --features schema
+          - name: watch
+            command: cargo check --workspace --no-default-features --features watch
+          - name: yaml
+            command: cargo check --workspace --no-default-features --features yaml
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@v2
+      - name: Run check
+        run: ${{ matrix.command }}
+
+  feature-tests:
+    name: Test ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            command: cargo test --workspace
+          - name: no-default-features
+            command: cargo test --workspace --no-default-features
+          - name: all-features
+            command: cargo test --workspace --all-features
+          - name: clap
+            command: cargo test --workspace --no-default-features --features clap
+          - name: derive
+            command: cargo test --workspace --no-default-features --features derive
+          - name: schema
+            command: cargo test --workspace --no-default-features --features schema
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@v2
+      - name: Run tests
+        run: ${{ matrix.command }}
