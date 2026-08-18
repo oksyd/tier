@@ -1,20 +1,25 @@
-use crate::report::ConfigReport;
+use std::fmt::{self, Debug, Formatter};
 
-#[cfg(feature = "schema")]
-use serde::Serialize;
-#[cfg(feature = "schema")]
-use serde::de::DeserializeOwned;
-#[cfg(feature = "schema")]
 use serde_json::Value;
 
 #[cfg(feature = "schema")]
 use crate::export::{json_pretty, json_value};
+use crate::report::ConfigReport;
 
-#[derive(Debug)]
 /// Loaded configuration plus its diagnostic report.
 pub struct LoadedConfig<T> {
     pub(super) config: T,
     pub(super) report: ConfigReport,
+    pub(super) raw_final: Value,
+}
+
+impl<T> Debug for LoadedConfig<T> {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LoadedConfig")
+            .field("report", &self.report)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<T> LoadedConfig<T> {
@@ -49,7 +54,14 @@ where
         Self {
             config: self.config.clone(),
             report: self.report.clone(),
+            raw_final: self.raw_final.clone(),
         }
+    }
+}
+
+impl<T> LoadedConfig<T> {
+    pub(crate) fn raw_final_value(&self) -> &Value {
+        &self.raw_final
     }
 }
 
@@ -64,7 +76,7 @@ impl<T> std::ops::Deref for LoadedConfig<T> {
 #[cfg(feature = "schema")]
 impl<T> LoadedConfig<T>
 where
-    T: Serialize + DeserializeOwned + crate::JsonSchema + crate::TierMetadata,
+    T: crate::JsonSchema + crate::TierMetadata,
 {
     /// Builds a versioned machine-readable export bundle for downstream tools.
     #[must_use]

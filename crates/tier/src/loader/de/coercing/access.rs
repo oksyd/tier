@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::de::{
     DeserializeSeed, Error as _, IntoDeserializer, MapAccess, SeqAccess,
@@ -17,6 +17,7 @@ pub(super) struct CoercingSeqAccess<'a, I> {
     string_coercion_paths: &'a BTreeSet<String>,
     known_paths: Option<&'a RefCell<BTreeSet<String>>>,
     ignored_paths: Option<&'a RefCell<Vec<String>>>,
+    coerced_values: Option<&'a RefCell<BTreeMap<String, Value>>>,
 }
 
 impl<'a, I> CoercingSeqAccess<'a, I> {
@@ -26,6 +27,7 @@ impl<'a, I> CoercingSeqAccess<'a, I> {
         string_coercion_paths: &'a BTreeSet<String>,
         known_paths: Option<&'a RefCell<BTreeSet<String>>>,
         ignored_paths: Option<&'a RefCell<Vec<String>>>,
+        coerced_values: Option<&'a RefCell<BTreeMap<String, Value>>>,
     ) -> Self {
         Self {
             iter,
@@ -33,6 +35,7 @@ impl<'a, I> CoercingSeqAccess<'a, I> {
             string_coercion_paths,
             known_paths,
             ignored_paths,
+            coerced_values,
         }
     }
 }
@@ -58,6 +61,7 @@ where
             self.string_coercion_paths,
             self.known_paths,
             self.ignored_paths,
+            self.coerced_values,
         ))
         .map(Some)
     }
@@ -70,6 +74,7 @@ pub(super) struct CoercingMapAccess<'a, I> {
     string_coercion_paths: &'a BTreeSet<String>,
     known_paths: Option<&'a RefCell<BTreeSet<String>>>,
     ignored_paths: Option<&'a RefCell<Vec<String>>>,
+    coerced_values: Option<&'a RefCell<BTreeMap<String, Value>>>,
 }
 
 impl<'a, I> CoercingMapAccess<'a, I> {
@@ -79,6 +84,7 @@ impl<'a, I> CoercingMapAccess<'a, I> {
         string_coercion_paths: &'a BTreeSet<String>,
         known_paths: Option<&'a RefCell<BTreeSet<String>>>,
         ignored_paths: Option<&'a RefCell<Vec<String>>>,
+        coerced_values: Option<&'a RefCell<BTreeMap<String, Value>>>,
     ) -> Self {
         Self {
             iter,
@@ -87,6 +93,7 @@ impl<'a, I> CoercingMapAccess<'a, I> {
             string_coercion_paths,
             known_paths,
             ignored_paths,
+            coerced_values,
         }
     }
 }
@@ -125,6 +132,7 @@ where
             self.string_coercion_paths,
             self.known_paths,
             self.ignored_paths,
+            self.coerced_values,
         ))
     }
 }

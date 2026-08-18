@@ -1,4 +1,5 @@
-use std::collections::BTreeSet;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::de::DeserializeOwned;
 use serde::de::value::Error as ValueDeError;
@@ -10,6 +11,7 @@ use crate::report::ConfigReport;
 use super::overrides::coerce_retry_scalars;
 use super::path::normalize_external_path;
 use super::unknown::find_source_for_unknown_path;
+use crate::path::replace_value_at_path;
 
 mod coercing;
 mod insert;
@@ -21,15 +23,29 @@ pub(super) fn deserialize_with_path<T>(
     value: &Value,
     report: &ConfigReport,
     string_coercion_paths: &BTreeSet<String>,
-) -> Result<T, ConfigError>
+) -> Result<(T, Value), ConfigError>
 where
     T: DeserializeOwned,
 {
     let deserialize_attempt = |value: &Value| {
-        let deserializer = CoercingDeserializer::new(value, "", string_coercion_paths, None, None);
+        let coerced_values = RefCell::new(BTreeMap::new());
+        let deserializer = CoercingDeserializer::new(
+            value,
+            "",
+            string_coercion_paths,
+            None,
+            None,
+            Some(&coerced_values),
+        );
         let result: Result<T, serde_path_to_error::Error<ValueDeError>> =
             serde_path_to_error::deserialize(deserializer);
-        result
+        result.map(|config| {
+            let mut effective = value.clone();
+            for (path, coerced) in coerced_values.into_inner() {
+                let _ = replace_value_at_path(&mut effective, &path, coerced);
+            }
+            (config, effective)
+        })
     };
 
     match deserialize_attempt(value) {

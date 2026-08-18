@@ -1,30 +1,39 @@
 use std::collections::BTreeSet;
 
-use serde::Serialize;
 use serde_json::Value;
 
-use crate::error::ConfigError;
+use crate::error::{ConfigError, ValidationFailure, ValidationFailures};
 use crate::metadata::ConfigMetadata;
 use crate::report::ConfigReport;
 
 use crate::loader::NamedValidator;
-use crate::loader::canonical::canonicalize_value_paths;
-use crate::loader::validation::{validate_declared_checks, validate_declared_rules};
+use crate::loader::validation::{
+    enrich_validation_errors, validate_declared_checks, validate_declared_rules,
+};
 
 pub(super) fn validate_loaded_config<T>(
     config: &T,
+    normalized_value: &Value,
     metadata: &ConfigMetadata,
     secret_paths: &BTreeSet<String>,
     report: &mut ConfigReport,
     validators: Vec<NamedValidator<T>>,
-) -> Result<Value, ConfigError>
-where
-    T: Serialize,
-{
-    let normalized_value = canonicalize_value_paths(&serde_json::to_value(config)?, metadata)?;
-    validate_declared_metadata(&normalized_value, metadata, secret_paths, report)?;
-    validate_custom_hooks(config, validators, report)?;
-    Ok(normalized_value)
+) -> Result<(), ConfigError> {
+    let mut failures = ValidationFailures::new();
+    validate_declared_metadata(
+        normalized_value,
+        metadata,
+        secret_paths,
+        report,
+        &mut failures,
+    );
+    validate_custom_hooks(config, validators, secret_paths, report, &mut failures);
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(ConfigError::Validation { failures })
+    }
 }
 
 fn validate_declared_metadata(
@@ -32,18 +41,18 @@ fn validate_declared_metadata(
     metadata: &ConfigMetadata,
     secret_paths: &BTreeSet<String>,
     report: &mut ConfigReport,
-) -> Result<(), ConfigError> {
-    let mut declared_errors =
-        validate_declared_rules(normalized_value, metadata, secret_paths, report);
-    declared_errors.extend(validate_declared_checks(
+    failures: &mut ValidationFailures,
+) {
+    let mut errors = validate_declared_rules(normalized_value, metadata, secret_paths, report);
+    errors.extend(validate_declared_checks(
         normalized_value,
         metadata,
         secret_paths,
     ));
-    if !declared_errors.is_empty() {
-        return Err(ConfigError::DeclaredValidation {
-            errors: declared_errors,
-        });
+    enrich_validation_errors(&mut errors, report, secret_paths);
+    if !errors.is_empty() {
+        failures.push(ValidationFailure::declared(errors));
+        return;
     }
 
     if metadata
@@ -56,22 +65,22 @@ fn validate_declared_metadata(
     if !metadata.checks().is_empty() {
         report.record_validation("tier::declared.checks".to_owned());
     }
-
-    Ok(())
 }
 
 fn validate_custom_hooks<T>(
     config: &T,
     validators: Vec<NamedValidator<T>>,
+    secret_paths: &BTreeSet<String>,
     report: &mut ConfigReport,
-) -> Result<(), ConfigError> {
+    failures: &mut ValidationFailures,
+) {
     for validator in validators {
-        (validator.run)(config).map_err(|errors| ConfigError::Validation {
-            name: validator.name.clone(),
-            errors,
-        })?;
-        report.record_validation(validator.name);
+        match (validator.run)(config) {
+            Ok(()) => report.record_validation(validator.name),
+            Err(mut errors) => {
+                enrich_validation_errors(&mut errors, report, secret_paths);
+                failures.push(ValidationFailure::custom(validator.name, errors));
+            }
+        }
     }
-
-    Ok(())
 }

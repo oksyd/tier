@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
@@ -26,14 +25,14 @@ use crate::loader::{
 };
 
 pub(super) struct LoadSession<T> {
-    defaults: T,
+    defaults: Value,
     files: Vec<FileSource>,
     env_sources: Vec<EnvSource>,
     custom_layers: Vec<PendingCustomLayer>,
     typed_arg_layers: Vec<DeferredPatchLayer>,
     metadata: ConfigMetadata,
     secret_paths: BTreeSet<SecretPathSpec>,
-    normalizers: Vec<NamedNormalizer<T>>,
+    normalizers: Vec<NamedNormalizer>,
     validators: Vec<NamedValidator<T>>,
     unknown_field_policy: UnknownFieldPolicy,
     env_decoders: BTreeMap<String, EnvDecoder>,
@@ -48,7 +47,7 @@ pub(super) struct LoadSession<T> {
 
 impl<T> LoadSession<T>
 where
-    T: Serialize + DeserializeOwned,
+    T: DeserializeOwned,
 {
     pub(super) fn prepare(loader: ConfigLoader<T>) -> Result<Self, ConfigError> {
         let ConfigLoader {
@@ -68,6 +67,7 @@ where
             custom_env_decoders,
             config_version,
             migrations,
+            target: _,
         } = loader;
 
         metadata.canonicalize_env_decoder_paths()?;
@@ -90,7 +90,8 @@ where
             .as_ref()
             .and_then(|args| args.profile.clone())
             .or(profile);
-        let defaults_shape = serde_json::to_value(&defaults)?;
+        let defaults = defaults?;
+        let defaults_shape = defaults.clone();
         ensure_root_object(&defaults_shape)?;
 
         Ok(Self {

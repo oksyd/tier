@@ -49,6 +49,7 @@ struct ValidationProjectionNullableSchemaConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 struct SchemaSecrets {
+    #[serde(serialize_with = "tier::secret::serialize_exposed")]
     password: Secret<String>,
 }
 
@@ -136,11 +137,13 @@ struct NumericObjectArrayUnionSchemaConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 struct SecretExampleSchemaConfig {
+    #[serde(serialize_with = "tier::secret::serialize_exposed")]
     token: Secret<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 struct SecretSchemaProvidedExampleConfig {
+    #[serde(serialize_with = "tier::secret::serialize_exposed")]
     token: Secret<SchemaProvidedSecretValue>,
 }
 
@@ -3986,6 +3989,7 @@ fn discovers_secret_paths_from_schema() {
 
     #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
     struct AutoSecretDb {
+        #[serde(serialize_with = "tier::secret::serialize_exposed")]
         password: Secret<String>,
     }
 
@@ -4019,6 +4023,7 @@ fn discovers_secret_paths_from_reused_schema_refs() {
 
     #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
     struct SharedDb {
+        #[serde(serialize_with = "tier::secret::serialize_exposed")]
         password: Secret<String>,
     }
 
@@ -4056,24 +4061,20 @@ fn discovers_secret_paths_from_reused_schema_refs() {
 
 #[test]
 fn discovers_secret_paths_from_tuple_items() {
-    #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+    #[derive(Debug, Clone, Deserialize, JsonSchema)]
     struct TupleSecretConfig {
         pair: (String, Secret<String>),
     }
 
-    impl Default for TupleSecretConfig {
-        fn default() -> Self {
-            Self {
-                pair: ("public".to_owned(), Secret::new("tuple-secret".to_owned())),
-            }
-        }
-    }
+    let loaded = ConfigLoader::<TupleSecretConfig>::from_value(serde_json::json!({
+        "pair": ["public", "tuple-secret"]
+    }))
+    .discover_secret_paths_from_schema()
+    .load()
+    .expect("config loads");
 
-    let loaded = ConfigLoader::new(TupleSecretConfig::default())
-        .discover_secret_paths_from_schema()
-        .load()
-        .expect("config loads");
-
+    assert_eq!(loaded.pair.0, "public");
+    assert_eq!(loaded.pair.1.expose_ref(), "tuple-secret");
     let redacted = loaded.report().redacted_value();
     assert_eq!(redacted["pair"][0].as_str(), Some("public"));
     assert_eq!(redacted["pair"][1].as_str(), Some("***redacted***"));

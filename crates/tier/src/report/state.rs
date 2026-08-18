@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::Value;
 
 use crate::loader::SourceTrace;
+use crate::path::{path_overlaps_pattern, redact_value};
 
 use super::{AppliedMigration, ConfigReport, ConfigWarning, ResolutionStep};
 
@@ -12,8 +13,9 @@ impl ConfigReport {
         secret_paths: BTreeSet<String>,
         alias_overrides: BTreeMap<String, String>,
     ) -> Self {
+        let redacted_final = redact_value(&final_value, "", &secret_paths);
         Self {
-            final_value,
+            redacted_final,
             secret_paths,
             alias_overrides,
             traces: BTreeMap::new(),
@@ -33,7 +35,7 @@ impl ConfigReport {
     }
 
     pub(crate) fn replace_final_value(&mut self, final_value: Value) {
-        self.final_value = final_value;
+        self.redacted_final = redact_value(&final_value, "", &self.secret_paths);
     }
 
     pub(crate) fn replace_runtime_metadata(
@@ -41,6 +43,16 @@ impl ConfigReport {
         secret_paths: BTreeSet<String>,
         alias_overrides: BTreeMap<String, String>,
     ) {
+        self.redacted_final = redact_value(&self.redacted_final, "", &secret_paths);
+        for (path, steps) in &mut self.traces {
+            let redacted = secret_paths
+                .iter()
+                .any(|secret| path_overlaps_pattern(path, secret));
+            for step in steps {
+                step.value = redact_value(&step.value, path, &secret_paths);
+                step.redacted |= redacted;
+            }
+        }
         self.secret_paths = secret_paths;
         self.alias_overrides = alias_overrides;
     }

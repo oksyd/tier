@@ -12,6 +12,9 @@ mod error;
 mod matching;
 mod rules;
 
+pub(super) use self::error::enrich_validation_errors;
+
+use self::error::enrich_validation_error;
 use self::matching::{collect_matching_values, is_present_value};
 use self::rules::validate_declared_rule;
 
@@ -50,6 +53,8 @@ pub(super) fn validate_declared_rules(
                 match field.validation_level_for(rule) {
                     crate::ValidationLevel::Error => errors.push(error),
                     crate::ValidationLevel::Warning => {
+                        let mut error = error;
+                        enrich_validation_error(&mut error, report, secret_paths);
                         report.record_warning(ConfigWarning::Validation(error));
                     }
                 }

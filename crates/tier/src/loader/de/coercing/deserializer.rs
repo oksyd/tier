@@ -17,6 +17,7 @@ macro_rules! deserialize_integer_from_value {
             V: Visitor<'de>,
         {
             scalar::deserialize_integer::<_, $ty, _>(&self, visitor, |visitor, value| {
+                self.record_coerced_value(&value);
                 visitor.$visit(value)
             })
         }
@@ -30,6 +31,7 @@ macro_rules! deserialize_float_from_value {
             V: Visitor<'de>,
         {
             scalar::deserialize_float::<_, $ty, _>(&self, visitor, |visitor, value| {
+                self.record_coerced_value(&value);
                 visitor.$visit(value)
             })
         }
@@ -67,6 +69,7 @@ where
                 self.string_coercion_paths,
                 self.known_paths,
                 self.ignored_paths,
+                self.coerced_values,
             )),
             Value::Object(map) => visitor.visit_map(CoercingMapAccess::new(
                 map.iter(),
@@ -74,6 +77,7 @@ where
                 self.string_coercion_paths,
                 self.known_paths,
                 self.ignored_paths,
+                self.coerced_values,
             )),
         }
     }
@@ -84,7 +88,10 @@ where
     {
         if let Some(raw) = self.coercible_string() {
             return match scalar::parse_bool(raw) {
-                Some(value) => visitor.visit_bool(value),
+                Some(value) => {
+                    self.record_coerced_value(&value);
+                    visitor.visit_bool(value)
+                }
                 None => Err(self.invalid_string_type(raw, &visitor)),
             };
         }
@@ -173,6 +180,7 @@ where
         if let Some(raw) = self.coercible_string()
             && raw.trim() == "null"
         {
+            self.record_coerced_value(&Value::Null);
             return visitor.visit_none();
         }
 
@@ -190,6 +198,7 @@ where
         if let Some(raw) = self.coercible_string()
             && raw.trim() == "null"
         {
+            self.record_coerced_value(&Value::Null);
             return visitor.visit_unit();
         }
 
@@ -229,6 +238,7 @@ where
                 self.string_coercion_paths,
                 self.known_paths,
                 self.ignored_paths,
+                self.coerced_values,
             )),
             _ => Err(self.invalid_type(&visitor)),
         }
@@ -272,6 +282,7 @@ where
                 self.string_coercion_paths,
                 self.known_paths,
                 self.ignored_paths,
+                self.coerced_values,
             )),
             _ => Err(self.invalid_type(&visitor)),
         }
@@ -310,6 +321,7 @@ where
                     self.string_coercion_paths,
                     self.known_paths,
                     self.ignored_paths,
+                    self.coerced_values,
                 )))
             }
             _ => Err(self.invalid_type(&visitor)),

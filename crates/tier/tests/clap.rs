@@ -33,6 +33,7 @@ struct CliServer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 struct CliDb {
+    #[serde(serialize_with = "tier::secret::serialize_exposed")]
     password: Secret<String>,
 }
 

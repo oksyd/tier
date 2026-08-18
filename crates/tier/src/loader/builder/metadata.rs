@@ -1,14 +1,8 @@
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-
 use crate::{ConfigMetadata, TierMetadata};
 
 use super::super::{ConfigLoader, UnknownFieldPolicy, secret_path::SecretPathSpec};
 
-impl<T> ConfigLoader<T>
-where
-    T: Serialize + DeserializeOwned,
-{
+impl<T> ConfigLoader<T> {
     /// Marks a dot-delimited path as sensitive for report redaction.
     #[must_use]
     pub fn secret_path(mut self, path: impl Into<String>) -> Self {

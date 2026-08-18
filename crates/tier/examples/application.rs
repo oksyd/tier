@@ -1,44 +1,34 @@
+#![allow(
+    dead_code,
+    reason = "configuration fields are consumed through serde and diagnostics"
+)]
+
 use std::fs;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 #[cfg(feature = "derive")]
 use tier::TierConfig;
 use tier::{ConfigLoader, EnvSource, Secret, ValidationErrors};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "derive", derive(TierConfig))]
 struct AppConfig {
     server: ServerConfig,
     db: DbConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "derive", derive(TierConfig))]
 struct ServerConfig {
     host: String,
     port: u16,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "derive", derive(TierConfig))]
 struct DbConfig {
     url: String,
     password: Secret<String>,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig {
-                host: "127.0.0.1".to_owned(),
-                port: 3000,
-            },
-            db: DbConfig {
-                url: "postgres://localhost/app".to_owned(),
-                password: Secret::new("secret".to_owned()),
-            },
-        }
-    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -63,7 +53,13 @@ host = "0.0.0.0"
 "#,
     )?;
 
-    let loader = ConfigLoader::new(AppConfig::default());
+    let loader = ConfigLoader::<AppConfig>::from_value(serde_json::json!({
+        "server": { "host": "127.0.0.1", "port": 3000 },
+        "db": {
+            "url": "postgres://localhost/app",
+            "password": "secret"
+        }
+    }));
     #[cfg(feature = "derive")]
     let loader = loader.derive_metadata();
     #[cfg(not(feature = "derive"))]

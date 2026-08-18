@@ -27,6 +27,7 @@ struct ReloadServer {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct ReloadDb {
+    #[serde(serialize_with = "tier::secret::serialize_exposed")]
     password: Secret<String>,
 }
 

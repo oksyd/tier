@@ -1,6 +1,7 @@
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use serde::Serialize;
 use serde::de::{Error as _, Unexpected, Visitor, value::Error as ValueDeError};
 use serde_json::Value;
 
@@ -14,6 +15,7 @@ pub(in crate::loader) struct CoercingDeserializer<'a> {
     pub(super) string_coercion_paths: &'a BTreeSet<String>,
     pub(super) known_paths: Option<&'a RefCell<BTreeSet<String>>>,
     pub(super) ignored_paths: Option<&'a RefCell<Vec<String>>>,
+    pub(super) coerced_values: Option<&'a RefCell<BTreeMap<String, Value>>>,
 }
 
 impl<'a> CoercingDeserializer<'a> {
@@ -23,6 +25,7 @@ impl<'a> CoercingDeserializer<'a> {
         string_coercion_paths: &'a BTreeSet<String>,
         known_paths: Option<&'a RefCell<BTreeSet<String>>>,
         ignored_paths: Option<&'a RefCell<Vec<String>>>,
+        coerced_values: Option<&'a RefCell<BTreeMap<String, Value>>>,
     ) -> Self {
         Self {
             value,
@@ -30,6 +33,7 @@ impl<'a> CoercingDeserializer<'a> {
             string_coercion_paths,
             known_paths,
             ignored_paths,
+            coerced_values,
         }
     }
 
@@ -69,6 +73,18 @@ impl<'a> CoercingDeserializer<'a> {
             if !normalized.is_empty() {
                 ignored_paths.borrow_mut().push(normalized);
             }
+        }
+    }
+
+    pub(super) fn record_coerced_value<T>(&self, value: &T)
+    where
+        T: Serialize,
+    {
+        let Some(coerced_values) = self.coerced_values else {
+            return;
+        };
+        if let Ok(value) = serde_json::to_value(value) {
+            coerced_values.borrow_mut().insert(self.path.clone(), value);
         }
     }
 }

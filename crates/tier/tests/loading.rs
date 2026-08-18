@@ -13,10 +13,22 @@ use tier::{
     ArgsSource, ConfigError, ConfigLoader, ConfigMetadata, ConfigMigration, ConfigWarning,
     EnvDecoder, EnvSource, EnvironmentVariableComponent, FieldMetadata, FileFormat, FileSource,
     Layer, MergeStrategy, MigrationConflictPolicy, REPORT_FORMAT_VERSION, SourceKind,
-    ValidationCheck, ValidationErrors, ValidationLevel,
+    ValidationCheck, ValidationError, ValidationErrors, ValidationLevel,
 };
 #[cfg(feature = "schema")]
 use tier::{EXPORT_BUNDLE_FORMAT_VERSION, EnvDocOptions};
+
+fn declared_validation_errors(error: ConfigError) -> ValidationErrors {
+    let ConfigError::Validation { failures } = error else {
+        panic!("expected validation error");
+    };
+
+    failures
+        .into_iter()
+        .find(|failure| matches!(failure.validator, tier::ValidatorKind::Declared))
+        .map(|failure| failure.errors)
+        .expect("expected declared validation failure")
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct AppConfig {
@@ -1340,7 +1352,12 @@ fn applies_profile_placeholders_and_tracks_normalization() {
         .optional_file(profile_path)
         .profile("prod")
         .normalizer("trim-host", |config| {
-            config.server.host = config.server.host.trim().to_ascii_lowercase();
+            let host = config["server"]["host"]
+                .as_str()
+                .ok_or_else(|| "server.host must be a string".to_owned())?
+                .trim()
+                .to_ascii_lowercase();
+            config["server"]["host"] = serde_json::Value::String(host);
             Ok::<_, String>(())
         })
         .load()
@@ -1367,7 +1384,10 @@ fn normalization_traces_paths_removed_by_skip_serializing_if() {
         token: Some("seed".to_owned()),
     })
     .normalizer("clear-token", |config| {
-        config.token = None;
+        config
+            .as_object_mut()
+            .ok_or_else(|| "configuration root must be an object".to_owned())?
+            .remove("token");
         Ok::<_, String>(())
     })
     .load()
@@ -1393,7 +1413,10 @@ fn removed_array_paths_still_explain_leading_zero_indices() {
         }]),
     })
     .normalizer("clear-users", |config| {
-        config.users = None;
+        config
+            .as_object_mut()
+            .ok_or_else(|| "configuration root must be an object".to_owned())?
+            .remove("users");
         Ok::<_, String>(())
     })
     .load()
@@ -1424,7 +1447,7 @@ fn removed_object_paths_do_not_alias_numeric_keys() {
         }),
     })
     .normalizer("clear-value", |config| {
-        config.value = serde_json::Value::Null;
+        config["value"] = serde_json::Value::Null;
         Ok::<_, String>(())
     })
     .load()
@@ -1588,9 +1611,7 @@ fn dot_validation_checks_still_target_known_numeric_object_keys() {
     .load()
     .expect_err("dot validation checks should target numeric object keys");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
     let required_if = errors
         .iter()
         .find(|entry| entry.rule.as_deref() == Some("required_if"))
@@ -1637,9 +1658,7 @@ fn bracket_validation_checks_allow_later_explicit_array_values() {
     .load()
     .expect_err("missing required array path should fail declared validation");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
     let required_if = errors
         .iter()
         .find(|entry| entry.rule.as_deref() == Some("required_if"))
@@ -2133,7 +2152,13 @@ fn rejects_object_keys_that_conflict_with_external_array_path_syntax() {
 fn normalizers_cannot_introduce_unrepresentable_object_keys() {
     let error = ConfigLoader::new(DynamicKeyConfig::default())
         .normalizer("insert-dotted-key", |config| {
-            config.headers.insert("x.y".to_owned(), "value".to_owned());
+            config["headers"]
+                .as_object_mut()
+                .ok_or_else(|| "headers must be an object".to_owned())?
+                .insert(
+                    "x.y".to_owned(),
+                    serde_json::Value::String("value".to_owned()),
+                );
             Ok::<_, String>(())
         })
         .load()
@@ -2152,7 +2177,13 @@ fn normalizers_cannot_introduce_unrepresentable_object_keys() {
 fn normalizers_cannot_introduce_keys_that_conflict_with_external_array_path_syntax() {
     let error = ConfigLoader::new(DynamicKeyConfig::default())
         .normalizer("insert-bracket-key", |config| {
-            config.headers.insert("x[0]".to_owned(), "value".to_owned());
+            config["headers"]
+                .as_object_mut()
+                .ok_or_else(|| "headers must be an object".to_owned())?
+                .insert(
+                    "x[0]".to_owned(),
+                    serde_json::Value::String("value".to_owned()),
+                );
             Ok::<_, String>(())
         })
         .load()
@@ -2239,6 +2270,115 @@ fn validation_errors_are_returned_with_context() {
     let message = error.to_string();
     assert!(message.contains("validator port-range failed"));
     assert!(message.contains("server.port"));
+}
+
+#[test]
+fn report_debug_and_accessors_never_expose_raw_secret_values() {
+    let loaded = ConfigLoader::new(AppConfig::default())
+        .secret_path("db.password")
+        .env(EnvSource::from_pairs([("APP__DB__PASSWORD", "rotated-secret")]).prefix("APP"))
+        .load()
+        .expect("config loads");
+
+    assert_eq!(loaded.db.password, "rotated-secret");
+    assert_eq!(
+        loaded.report().redacted_final_value()["db"]["password"].as_str(),
+        Some("***redacted***")
+    );
+    for rendered in [format!("{:?}", loaded.report()), format!("{loaded:?}")] {
+        assert!(rendered.contains("***redacted***"));
+        assert!(!rendered.contains("rotated-secret"));
+    }
+}
+
+#[test]
+fn all_custom_validators_run_and_errors_include_file_and_env_provenance() {
+    let dir = tempdir().expect("temporary directory");
+    let config_path = dir.path().join("validation.toml");
+    fs::write(
+        &config_path,
+        r#"
+            [db]
+            url = "postgres://file/app"
+        "#,
+    )
+    .expect("validation file");
+
+    let error = ConfigLoader::new(AppConfig::default())
+        .file(&config_path)
+        .env(EnvSource::from_pairs([("APP__SERVER__PORT", "9000")]).prefix("APP"))
+        .validator("server-check", |_| {
+            Err(ValidationErrors::from_message(
+                "server.port",
+                "server validation failed",
+            ))
+        })
+        .validator("database-check", |_| {
+            Err(ValidationErrors::from_message(
+                "db.url",
+                "database validation failed",
+            ))
+        })
+        .load()
+        .expect_err("both validators must fail");
+
+    let rendered = error.to_string();
+    assert!(rendered.contains("env(APP__SERVER__PORT)"));
+    assert!(rendered.contains(&format!("file({})", config_path.display())));
+
+    let ConfigError::Validation { failures } = error else {
+        panic!("expected validation error");
+    };
+    let failures = failures.into_vec();
+    assert_eq!(failures.len(), 2);
+    assert!(matches!(
+        &failures[0].validator,
+        tier::ValidatorKind::Custom(name) if name == "server-check"
+    ));
+    assert!(matches!(
+        &failures[1].validator,
+        tier::ValidatorKind::Custom(name) if name == "database-check"
+    ));
+
+    let env_source = &failures[0]
+        .errors
+        .iter()
+        .next()
+        .expect("server error")
+        .provenance[0]
+        .source;
+    assert_eq!(env_source.kind, SourceKind::Environment);
+    assert_eq!(env_source.name, "APP__SERVER__PORT");
+
+    let file_source = &failures[1]
+        .errors
+        .iter()
+        .next()
+        .expect("database error")
+        .provenance[0]
+        .source;
+    assert_eq!(file_source.kind, SourceKind::File);
+    assert_eq!(file_source.name, config_path.display().to_string());
+}
+
+#[test]
+fn custom_validation_payloads_for_secret_paths_are_redacted() {
+    let error = ConfigLoader::new(AppConfig::default())
+        .secret_path("db.password")
+        .validator("secret-check", |config| {
+            Err(ValidationErrors::from_error(
+                ValidationError::new("db.password", "secret is not accepted")
+                    .with_actual(serde_json::json!(config.db.password.clone()))
+                    .with_expected(serde_json::json!("another-secret")),
+            ))
+        })
+        .load()
+        .expect_err("secret validator must fail");
+
+    let rendered = format!("{error:?}\n{error}");
+    assert!(rendered.contains("***redacted***"));
+    assert!(!rendered.contains("default-secret"));
+    assert!(!rendered.contains("another-secret"));
 }
 
 #[test]
@@ -4393,9 +4533,9 @@ fn concrete_secret_metadata_paths_stay_canonical_after_normalizer_creates_array_
         )
         .secret()]))
         .normalizer("seed-user", |config| {
-            config.users = Some(vec![UserRecord {
-                name: "alice".to_owned(),
-                password: "normalized-secret".to_owned(),
+            config["users"] = serde_json::json!([{
+                "name": "alice",
+                "password": "normalized-secret"
             }]);
             Ok::<_, String>(())
         })
@@ -4429,18 +4569,16 @@ fn concrete_validation_metadata_paths_stay_canonical_after_normalizer_creates_ar
         .secret()
         .non_empty()]))
         .normalizer("seed-user", |config| {
-            config.users = Some(vec![UserRecord {
-                name: "alice".to_owned(),
-                password: String::new(),
+            config["users"] = serde_json::json!([{
+                "name": "alice",
+                "password": ""
             }]);
             Ok::<_, String>(())
         })
         .load()
         .expect_err("declared validation must run after normalizer");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     let entry = errors
         .iter()
@@ -4457,7 +4595,7 @@ fn concrete_validation_metadata_paths_stay_canonical_after_normalizer_creates_ar
 fn normalization_traces_new_paths_when_container_shape_changes() {
     let loaded = ConfigLoader::new(DynamicValueConfig::default())
         .normalizer("reshape-value", |config| {
-            config.value = serde_json::json!([
+            config["value"] = serde_json::json!([
                 {
                     "password": "after"
                 }
@@ -4723,9 +4861,7 @@ fn wildcard_declared_validation_runs_for_array_items() {
     .load()
     .expect_err("declared validation must run for array items");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     assert!(errors.iter().any(|error| error.path == "users.0.name"));
     assert!(errors.iter().any(|error| {
@@ -4753,9 +4889,7 @@ fn exact_declared_validations_override_duplicate_wildcard_rules_without_double_r
     .load()
     .expect_err("duplicate wildcard and exact validations should still report once");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     let name_errors = errors
         .iter()
@@ -4781,9 +4915,7 @@ fn exact_validation_configs_can_override_inherited_wildcard_rules() {
     .load()
     .expect_err("exact validation config should apply to inherited wildcard rule");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     let name_error = errors
         .iter()
@@ -4868,9 +5000,7 @@ fn declared_validation_rules_return_structured_errors_and_redact_secrets() {
         .load()
         .expect_err("declared validation must fail");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     assert_eq!(errors.len(), 3);
 
@@ -4931,9 +5061,7 @@ fn invalid_declarative_numeric_bounds_return_structured_errors() {
         .load()
         .expect_err("invalid bounds must fail without panicking");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     assert_eq!(errors.len(), 1);
     let error = errors.iter().next().expect("validation error");
@@ -4974,9 +5102,7 @@ fn declared_numeric_validation_preserves_large_integer_precision() {
         .load()
         .expect_err("large integer validation must not round through f64");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     assert_eq!(errors.len(), 3);
     assert!(errors.iter().any(|error| {
@@ -5066,9 +5192,7 @@ fn url_validation_rejects_hierarchical_urls_without_authority() {
         .load()
         .expect_err("hierarchical URLs without authority should fail");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
     assert_eq!(errors.len(), 4);
     assert!(
         errors
@@ -5108,9 +5232,7 @@ fn url_validation_rejects_authorities_with_multiple_unescaped_at_signs() {
         .load()
         .expect_err("multiple unescaped @ signs in authority should fail");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
     assert_eq!(errors.len(), 1);
     let error = errors.iter().next().expect("validation error");
     assert_eq!(error.path, "malformed_database_url");
@@ -5140,9 +5262,7 @@ fn url_validation_rejects_invalid_userinfo_characters() {
         .load()
         .expect_err("invalid userinfo characters in authority should fail");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
     assert_eq!(errors.len(), 1);
     let error = errors.iter().next().expect("validation error");
     assert_eq!(error.path, "malformed_database_url");
@@ -5177,9 +5297,7 @@ fn url_validation_rejects_invalid_percent_escapes() {
         .load()
         .expect_err("invalid percent escapes should fail URL validation");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
     assert_eq!(errors.len(), 3);
     assert!(
         errors
@@ -5222,9 +5340,7 @@ fn email_validation_accepts_bracketed_ip_literals_and_rejects_bare_ip_domains() 
         .load()
         .expect_err("bare IP email domains should fail validation");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
     assert_eq!(errors.len(), 2);
     assert!(
         errors
@@ -5371,9 +5487,7 @@ fn declared_validation_supports_cross_field_checks_and_extended_rules() {
         .load()
         .expect_err("advanced declared validation must fail");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     assert!(
         errors
@@ -5496,9 +5610,7 @@ fn numeric_required_if_validation_treats_integer_and_float_equivalent_values_as_
     .load()
     .expect_err("numeric required_if should trigger on mathematical equality");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     assert!(errors.iter().any(|error| {
         error.rule.as_deref() == Some("required_if")
@@ -5522,9 +5634,7 @@ fn unique_items_validation_treats_integer_and_float_equivalent_values_as_duplica
     .load()
     .expect_err("numeric-equivalent items should violate unique_items");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     assert!(
         errors.iter().any(|error| {
@@ -5555,9 +5665,7 @@ fn wildcard_required_if_binds_to_the_matching_collection_item() {
     .load()
     .expect_err("missing password for a matched item should fail");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     let wildcard_error = errors
         .iter()
@@ -5595,9 +5703,7 @@ fn manual_required_if_checks_accept_external_bracket_paths() {
     .load()
     .expect_err("missing password for a bracket-addressed item should fail");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     let required_if = errors
         .iter()
@@ -5665,9 +5771,7 @@ fn wildcard_required_with_binds_to_the_matching_collection_item() {
     .load()
     .expect_err("missing cert for a matched item should fail");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     let wildcard_error = errors
         .iter()
@@ -5709,9 +5813,7 @@ fn declared_checks_accept_alias_paths() {
         .load()
         .expect_err("alias-based declared checks should fail when required fields are missing");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     let alias_error = errors
         .iter()

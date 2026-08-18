@@ -2,6 +2,17 @@ use std::fmt::{self, Display, Formatter};
 
 use serde_json::Value;
 
+use crate::loader::SourceTrace;
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// Source that most recently contributed a path involved in a validation issue.
+pub struct PathProvenance {
+    /// Canonical configuration path.
+    pub path: String,
+    /// Most recent source for the path.
+    pub source: SourceTrace,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 /// A single validation failure returned by a validator hook.
 pub struct ValidationError {
@@ -19,10 +30,16 @@ pub struct ValidationError {
     pub actual: Option<Value>,
     /// Optional machine-readable tags for downstream consumers.
     pub tags: Vec<String>,
+    /// Most recent sources for the primary and related paths.
+    pub provenance: Vec<PathProvenance>,
 }
 
 impl ValidationError {
     /// Creates a new validation error.
+    ///
+    /// Keep `message` independent of runtime values. The loader redacts the
+    /// structured `actual` and `expected` payloads for secret paths, but it
+    /// cannot safely parse and rewrite arbitrary human-readable text.
     #[must_use]
     pub fn new(path: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
@@ -33,6 +50,7 @@ impl ValidationError {
             expected: None,
             actual: None,
             tags: Vec::new(),
+            provenance: Vec::new(),
         }
     }
 
@@ -78,14 +96,39 @@ impl ValidationError {
         self.tags = tags.into_iter().map(Into::into).collect();
         self
     }
+
+    /// Attaches path-level source information.
+    #[must_use]
+    pub fn with_provenance<I>(mut self, provenance: I) -> Self
+    where
+        I: IntoIterator<Item = PathProvenance>,
+    {
+        self.provenance = provenance.into_iter().collect();
+        self
+    }
 }
 
 impl Display for ValidationError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         if self.path.is_empty() {
-            write!(f, "{}", self.message)
+            write!(f, "{}", self.message)?;
         } else {
-            write!(f, "{}: {}", self.path, self.message)
+            write!(f, "{}: {}", self.path, self.message)?;
+        }
+
+        match self.provenance.as_slice() {
+            [] => Ok(()),
+            [entry] => write!(f, " (from {})", entry.source),
+            entries => {
+                f.write_str(" (sources: ")?;
+                for (index, entry) in entries.iter().enumerate() {
+                    if index > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{} from {}", entry.path, entry.source)?;
+                }
+                f.write_str(")")
+            }
         }
     }
 }
@@ -151,6 +194,10 @@ impl ValidationErrors {
     pub fn iter(&self) -> impl Iterator<Item = &ValidationError> {
         self.errors.iter()
     }
+
+    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut ValidationError> {
+        self.errors.iter_mut()
+    }
 }
 
 impl IntoIterator for ValidationErrors {
@@ -175,3 +222,119 @@ impl Display for ValidationErrors {
 }
 
 impl std::error::Error for ValidationErrors {}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "name", rename_all = "snake_case")]
+/// Identifies the validation stage that produced a failure.
+pub enum ValidatorKind {
+    /// Metadata-driven field and cross-field validation.
+    Declared,
+    /// A named application validator hook.
+    Custom(String),
+}
+
+impl Display for ValidatorKind {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Declared => formatter.write_str("declared validation"),
+            Self::Custom(name) => write!(formatter, "validator {name}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// All issues returned by one validation stage or custom validator.
+pub struct ValidationFailure {
+    /// Validator that produced the issues.
+    pub validator: ValidatorKind,
+    /// Issues produced by the validator.
+    pub errors: ValidationErrors,
+}
+
+impl ValidationFailure {
+    /// Creates a failure for metadata-driven validation.
+    #[must_use]
+    pub fn declared(errors: ValidationErrors) -> Self {
+        Self {
+            validator: ValidatorKind::Declared,
+            errors,
+        }
+    }
+
+    /// Creates a failure for a named custom validator.
+    #[must_use]
+    pub fn custom(name: impl Into<String>, errors: ValidationErrors) -> Self {
+        Self {
+            validator: ValidatorKind::Custom(name.into()),
+            errors,
+        }
+    }
+}
+
+impl Display for ValidationFailure {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{} failed:\n{}", self.validator, self.errors)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// Ordered validation failures collected across all validation stages.
+pub struct ValidationFailures {
+    failures: Vec<ValidationFailure>,
+}
+
+impl ValidationFailures {
+    /// Creates an empty validation failure collection.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Appends one validator failure.
+    pub fn push(&mut self, failure: ValidationFailure) {
+        self.failures.push(failure);
+    }
+
+    /// Returns whether no validator failed.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.failures.is_empty()
+    }
+
+    /// Returns the number of failed validators or validation stages.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.failures.len()
+    }
+
+    /// Iterates over failures in validation order.
+    pub fn iter(&self) -> impl Iterator<Item = &ValidationFailure> {
+        self.failures.iter()
+    }
+
+    /// Consumes the collection into its ordered failures.
+    pub fn into_vec(self) -> Vec<ValidationFailure> {
+        self.failures
+    }
+}
+
+impl IntoIterator for ValidationFailures {
+    type Item = ValidationFailure;
+    type IntoIter = std::vec::IntoIter<ValidationFailure>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.failures.into_iter()
+    }
+}
+
+impl Display for ValidationFailures {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        for (index, failure) in self.failures.iter().enumerate() {
+            if index > 0 {
+                writeln!(formatter)?;
+            }
+            write!(formatter, "{failure}")?;
+        }
+        Ok(())
+    }
+}

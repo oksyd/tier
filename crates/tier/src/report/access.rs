@@ -23,10 +23,10 @@ impl ConfigReport {
         }
     }
 
-    /// Returns the final merged configuration value before redaction.
+    /// Returns the final merged configuration value with sensitive paths redacted.
     #[must_use]
-    pub fn final_value(&self) -> &Value {
-        &self.final_value
+    pub fn redacted_final_value(&self) -> &Value {
+        &self.redacted_final
     }
 
     /// Returns sources that were applied in order.
@@ -66,8 +66,12 @@ impl ConfigReport {
     }
 
     pub(crate) fn latest_source_for(&self, path: &str) -> Option<SourceTrace> {
-        let path =
-            normalize_lookup_path(path, &self.final_value, &self.alias_overrides, &self.traces)?;
+        let path = normalize_lookup_path(
+            path,
+            &self.redacted_final,
+            &self.alias_overrides,
+            &self.traces,
+        )?;
         self.traces
             .get(&path)
             .and_then(|steps| steps.last())

@@ -66,12 +66,12 @@ where
         let _reload_guard = mutex_lock(&self.reload_gate);
         let before = Arc::clone(&read_lock(&self.state));
         let before_report = before.report();
-        let before_raw = before_report.final_value().clone();
+        let before_raw = before.raw_final_value().clone();
         let before_redacted = before_report.redacted_value();
 
         match (self.loader)() {
             Ok(next) => {
-                let after_raw = next.report().final_value().clone();
+                let after_raw = next.raw_final_value().clone();
                 let after_redacted = next.report().redacted_value();
                 let summary = build_reload_summary(
                     &before_raw,

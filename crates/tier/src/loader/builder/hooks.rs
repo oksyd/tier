@@ -1,21 +1,18 @@
 use std::fmt::Display;
 
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+use serde_json::Value;
 
 use crate::error::ValidationErrors;
 
 use super::super::{ConfigLoader, NamedNormalizer, NamedValidator};
 
-impl<T> ConfigLoader<T>
-where
-    T: Serialize + DeserializeOwned,
-{
-    /// Registers a normalization hook applied after merge and before validation.
+impl<T> ConfigLoader<T> {
+    /// Registers a normalization hook applied to the merged configuration
+    /// document before typed deserialization and validation.
     #[must_use]
     pub fn normalizer<F, E>(mut self, name: impl Into<String>, normalizer: F) -> Self
     where
-        F: Fn(&mut T) -> Result<(), E> + Send + Sync + 'static,
+        F: Fn(&mut Value) -> Result<(), E> + Send + Sync + 'static,
         E: Display,
     {
         self.normalizers.push(NamedNormalizer {

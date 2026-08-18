@@ -1,17 +1,22 @@
+#![allow(
+    dead_code,
+    reason = "configuration fields are consumed through schema generation"
+)]
+
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tier::{
     EnvDocOptions, Secret, TierConfig, annotated_json_schema_pretty, config_example_toml,
     env_docs_report_json_pretty,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TierConfig)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, TierConfig)]
 struct AppConfig {
     server: ServerConfig,
     db: DbConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TierConfig)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, TierConfig)]
 struct ServerConfig {
     #[tier(
         env = "APP_SERVER_HOST",
@@ -24,7 +29,7 @@ struct ServerConfig {
     port: u16,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TierConfig)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, TierConfig)]
 struct DbConfig {
     #[tier(env = "DATABASE_URL")]
     url: String,

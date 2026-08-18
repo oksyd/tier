@@ -1,13 +1,10 @@
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-
 use super::super::{
     ConfigLoader, schema_secrets::schema_secret_paths, secret_path::SecretPathSpec,
 };
 
 impl<T> ConfigLoader<T>
 where
-    T: Serialize + DeserializeOwned + schemars::JsonSchema,
+    T: schemars::JsonSchema,
 {
     /// Discovers secret paths from the target type's JSON Schema.
     #[must_use]

@@ -9,14 +9,18 @@ impl ConfigReport {
     /// Returns the final configuration value with secret paths redacted.
     #[must_use]
     pub fn redacted_value(&self) -> serde_json::Value {
-        redact_value(&self.final_value, "", &self.secret_paths)
+        self.redacted_final.clone()
     }
 
     /// Explains how a configuration path was resolved.
     #[must_use]
     pub fn explain(&self, path: &str) -> Option<Explanation> {
-        let normalized =
-            normalize_lookup_path(path, &self.final_value, &self.alias_overrides, &self.traces)?;
+        let normalized = normalize_lookup_path(
+            path,
+            &self.redacted_final,
+            &self.alias_overrides,
+            &self.traces,
+        )?;
         let redacted = path_overlaps_secret(&normalized, &self.secret_paths);
         let steps = self
             .traces
@@ -31,9 +35,7 @@ impl ConfigReport {
                 step
             })
             .collect();
-        let final_value = get_value_at_path(&self.final_value, &normalized)
-            .cloned()
-            .map(|value| redact_value(&value, &normalized, &self.secret_paths));
+        let final_value = get_value_at_path(&self.redacted_final, &normalized).cloned();
 
         Some(Explanation {
             path: normalized,

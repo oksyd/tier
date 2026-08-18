@@ -15,7 +15,10 @@ use self::format::{
     format_source_policy, format_unknown_fields,
 };
 pub use self::model::{LineColumn, UnknownField};
-pub use self::validation::{ValidationError, ValidationErrors};
+pub use self::validation::{
+    PathProvenance, ValidationError, ValidationErrors, ValidationFailure, ValidationFailures,
+    ValidatorKind,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Part of an environment variable that could not be decoded as Unicode.
@@ -300,20 +303,11 @@ pub enum ConfigError {
         message: String,
     },
 
-    /// A validator hook failed.
-    #[error("validator {name} failed:\n{errors}")]
+    /// One or more validation stages failed.
+    #[error("configuration validation failed:\n{failures}")]
     Validation {
-        /// Validator name.
-        name: String,
-        /// Validation failures returned by the hook.
-        errors: ValidationErrors,
-    },
-
-    /// Built-in field validation rules failed.
-    #[error("declared validation failed:\n{errors}")]
-    DeclaredValidation {
-        /// Validation failures returned by metadata-driven rules.
-        errors: ValidationErrors,
+        /// Ordered failures returned by declared and custom validators.
+        failures: ValidationFailures,
     },
 }
 
@@ -328,8 +322,8 @@ impl ConfigError {
                     format_unknown_fields(fields)
                 )
             }
-            Self::Validation { errors, .. } | Self::DeclaredValidation { errors } => {
-                format!("Configuration validation failed:\n{errors}")
+            Self::Validation { failures } => {
+                format!("Configuration validation failed:\n{failures}")
             }
             Self::ExplainPathNotFound { path } => {
                 format!("Configuration path `{path}` was not found in the final report")

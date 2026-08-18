@@ -31,6 +31,7 @@ struct BenchServer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BenchDb {
     url: String,
+    #[serde(serialize_with = "tier::secret::serialize_exposed")]
     password: Secret<String>,
 }
 

@@ -986,9 +986,11 @@ mod clap_bridge {
 
     #[test]
     fn tier_cli_renders_config_errors_for_terminal_output() {
-        let rendered = tier::TierCli::render_error(&tier::ConfigError::DeclaredValidation {
-            errors: tier::ValidationErrors::from_message("db.token", "must not be empty"),
-        });
+        let mut failures = tier::ValidationFailures::new();
+        failures.push(tier::ValidationFailure::declared(
+            tier::ValidationErrors::from_message("db.token", "must not be empty"),
+        ));
+        let rendered = tier::TierCli::render_error(&tier::ConfigError::Validation { failures });
 
         assert!(rendered.contains("Configuration validation failed:"));
         assert!(rendered.contains("- db.token: must not be empty"));

@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
 use serde_json::Value;
 
 use crate::error::ConfigError;
@@ -64,24 +63,21 @@ pub(super) fn merge_layers_into_report(
     })
 }
 
-pub(super) fn run_normalizers<T>(
-    normalizers: Vec<NamedNormalizer<T>>,
-    config: &mut T,
+pub(super) fn run_normalizers(
+    normalizers: Vec<NamedNormalizer>,
+    config: &mut Value,
     metadata: &mut ConfigMetadata,
     pending_secret_paths: &BTreeSet<SecretPathSpec>,
     runtime_metadata: &mut RuntimeMetadata,
     report: &mut ConfigReport,
-) -> Result<(), ConfigError>
-where
-    T: Serialize,
-{
+) -> Result<(), ConfigError> {
     for normalizer in normalizers {
-        let before = serde_json::to_value(&config)?;
+        let before = config.clone();
         (normalizer.run)(config).map_err(|message| ConfigError::Normalize {
             name: normalizer.name.clone(),
             message,
         })?;
-        let after = serde_json::to_value(&config)?;
+        let after = config.clone();
         ensure_root_object(&after)?;
         ensure_path_safe_keys(&after, "")?;
 

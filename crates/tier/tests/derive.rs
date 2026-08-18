@@ -7,8 +7,21 @@ use serde::{Deserialize, Serialize};
 
 use tier::{
     ArgsSource, ConfigError, ConfigLoader, ConfigMetadata, EnvSource, FieldMetadata, MergeStrategy,
-    Secret, SourceKind, TierConfig, TierMetadata, ValidationCheck, ValidationLevel, ValidationRule,
+    Secret, SourceKind, TierConfig, TierMetadata, ValidationCheck, ValidationErrors,
+    ValidationLevel, ValidationRule,
 };
+
+fn declared_validation_errors(error: ConfigError) -> ValidationErrors {
+    let ConfigError::Validation { failures } = error else {
+        panic!("expected validation error");
+    };
+
+    failures
+        .into_iter()
+        .find(|failure| matches!(failure.validator, tier::ValidatorKind::Declared))
+        .map(|failure| failure.errors)
+        .expect("expected declared validation failure")
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, TierConfig)]
 struct DerivedConfig {
@@ -33,6 +46,7 @@ struct DerivedServer {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TierConfig)]
 struct DerivedDb {
+    #[serde(serialize_with = "tier::secret::serialize_exposed")]
     password: Secret<String>,
     #[tier(secret)]
     token: String,
@@ -70,7 +84,10 @@ struct AliasDrivenConfig {
 struct AliasDrivenServer {
     #[serde(alias = "legacyPort")]
     bind_port: u16,
-    #[serde(alias = "legacyToken")]
+    #[serde(
+        alias = "legacyToken",
+        serialize_with = "tier::secret::serialize_exposed"
+    )]
     auth_token: Secret<String>,
 }
 
@@ -192,6 +209,7 @@ enum BackendConfig {
     #[serde(alias = "legacy-redis")]
     Redis {
         endpoint_url: String,
+        #[serde(serialize_with = "tier::secret::serialize_exposed")]
         auth_token: Secret<String>,
     },
 }
@@ -315,6 +333,7 @@ struct DerivedCollectionConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, TierConfig)]
 struct DerivedCollectionUser {
     name: String,
+    #[serde(serialize_with = "tier::secret::serialize_exposed")]
     password: Secret<String>,
 }
 
@@ -332,6 +351,7 @@ struct DerivedCollectionValidatedUser {
 #[derive(Debug, Clone, Serialize, Deserialize, TierConfig)]
 struct SecretMergeConfig {
     #[tier(merge = "replace")]
+    #[serde(serialize_with = "tier::secret::serialize_exposed")]
     token: Secret<String>,
 }
 
@@ -667,9 +687,7 @@ fn derive_metadata_runs_declared_validations_for_collection_items() {
         .load()
         .expect_err("declared validation must run for collection items");
 
-    let tier::ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     assert!(errors.iter().any(|error| error.path == "users.0.name"));
 }
@@ -897,9 +915,7 @@ fn checked_path_container_validations_enforce_runtime_behavior() {
     .load()
     .expect_err("missing checked-path requirements should fail");
 
-    let ConfigError::DeclaredValidation { errors } = error else {
-        panic!("expected declared validation error");
-    };
+    let errors = declared_validation_errors(error);
 
     assert!(
         errors

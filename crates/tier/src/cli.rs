@@ -1,8 +1,5 @@
 use std::path::PathBuf;
 
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-
 #[cfg(all(feature = "schema", not(feature = "toml")))]
 use crate::config_example_pretty;
 #[cfg(all(feature = "schema", feature = "toml"))]
@@ -173,10 +170,7 @@ impl TierCli {
 
     /// Applies CLI-derived overrides onto an existing [`ConfigLoader`].
     #[must_use]
-    pub fn apply<T>(&self, loader: ConfigLoader<T>) -> ConfigLoader<T>
-    where
-        T: Serialize + DeserializeOwned,
-    {
+    pub fn apply<T>(&self, loader: ConfigLoader<T>) -> ConfigLoader<T> {
         loader.args(self.to_args_source())
     }
 
@@ -227,7 +221,7 @@ impl TierCli {
         loaded: &LoadedConfig<T>,
     ) -> Result<Option<String>, ConfigError>
     where
-        T: Serialize + DeserializeOwned + JsonSchema + TierMetadata,
+        T: JsonSchema + TierMetadata,
     {
         match self.command() {
             TierCliCommand::PrintConfigSchema => Ok(Some(annotated_json_schema_pretty::<T>())),

@@ -333,16 +333,16 @@ The crate ships with focused examples under [`examples/`](./examples):
 
 ```rust,no_run
 # #[cfg(feature = "derive")] {
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tier::{ArgsSource, ConfigLoader, EnvSource, Secret, TierConfig, ValidationErrors};
 
-#[derive(Debug, Clone, Serialize, Deserialize, TierConfig)]
+#[derive(Debug, Clone, Deserialize, TierConfig)]
 struct AppConfig {
     server: ServerConfig,
     db: DbConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TierConfig)]
+#[derive(Debug, Clone, Deserialize, TierConfig)]
 struct ServerConfig {
     #[tier(
         env = "APP_SERVER_HOST",
@@ -354,27 +354,16 @@ struct ServerConfig {
     port: u16,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TierConfig)]
+#[derive(Debug, Clone, Deserialize, TierConfig)]
 struct DbConfig {
     password: Secret<String>,
 }
 
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig {
-                host: "127.0.0.1".into(),
-                port: 3000,
-            },
-            db: DbConfig {
-                password: Secret::new("secret".into()),
-            },
-        }
-    }
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let loaded = ConfigLoader::new(AppConfig::default())
+    let loaded = ConfigLoader::<AppConfig>::from_value(serde_json::json!({
+        "server": { "host": "127.0.0.1", "port": 3000 },
+        "db": { "password": "secret" }
+    }))
         .derive_metadata()
         .file("config/default.toml")
         .optional_file("config/{profile}.toml")
@@ -406,7 +395,10 @@ declared validation rules, env docs, and deprecation warnings.
 
 `tier` supports metadata-driven field and cross-field validation alongside
 custom validator hooks. Declared rules feed the loader, schema annotations,
-env docs, and commented TOML examples from the same metadata source.
+env docs, and commented TOML examples from the same metadata source. Every
+registered validator runs, and `ConfigError::Validation` returns all failures
+in registration order. Each path-level issue is enriched with the most recent
+file, environment variable, CLI, or other layer that supplied the value.
 
 ```rust
 # #[cfg(feature = "derive")] {
@@ -442,9 +434,16 @@ let error = ConfigLoader::new(AppConfig::default())
     .load()
     .expect_err("declared validation must fail");
 
-assert!(matches!(error, ConfigError::DeclaredValidation { .. }));
+let ConfigError::Validation { failures } = error else {
+    panic!("expected validation failures");
+};
+assert_eq!(failures.len(), 1);
 # }
 ```
+
+`ConfigReport` stores only a redacted final snapshot. Use
+`redacted_final_value()` for machine-readable diagnostics; the raw final value
+is available only through the typed `LoadedConfig<T>` value itself.
 
 ## Reload
 
@@ -577,18 +576,32 @@ assert!(example.contains("[server]"));
 ## Secrets
 
 `tier::Secret<T>` is a strong typed wrapper for sensitive values. It redacts
-`Debug` and `Display` output, and with the `schema` feature it marks fields as
-`writeOnly` so the loader can auto-discover secret paths.
+`Debug` and `Display` output, does not implement `Serialize`, and with the
+`schema` feature marks fields as `writeOnly` so the loader can auto-discover
+secret paths. Use `ConfigLoader::from_value` when the target config is
+deserialize-only. Plaintext serialization requires an explicit, auditable
+`serialize_with` attribute at the enclosing field.
 
 ```rust
 use serde::{Deserialize, Serialize};
-use tier::Secret;
+use tier::{ConfigLoader, Secret};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct DbConfig {
     password: Secret<String>,
 }
 
-let password = Secret::new("super-secret".to_owned());
-assert_eq!(format!("{password}"), "***redacted***");
+let loaded = ConfigLoader::<DbConfig>::from_value(serde_json::json!({
+    "password": "super-secret"
+}))
+.secret_path("password")
+.load()?;
+assert_eq!(format!("{}", loaded.password), "***redacted***");
+
+#[derive(Serialize)]
+struct ExplicitExport {
+    #[serde(serialize_with = "tier::secret::serialize_exposed")]
+    password: Secret<String>,
+}
+# Ok::<(), tier::ConfigError>(())
 ```

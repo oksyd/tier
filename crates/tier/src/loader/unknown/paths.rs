@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
 use serde_json::Value;
 
 use crate::ConfigMetadata;
@@ -10,14 +9,6 @@ use crate::report::ConfigReport;
 
 use super::suggest::{best_path_suggestion, find_source_for_unknown_path};
 use crate::loader::path::normalize_external_path;
-
-pub(in crate::loader) fn collect_known_paths<T>(config: &T) -> Result<BTreeSet<String>, ConfigError>
-where
-    T: Serialize,
-{
-    let value = serde_json::to_value(config)?;
-    Ok(collect_known_paths_from_value(&value))
-}
 
 pub(in crate::loader) fn collect_known_paths_from_value(value: &Value) -> BTreeSet<String> {
     let mut paths = Vec::new();

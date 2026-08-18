@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::{self, Debug, Formatter};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -12,7 +13,7 @@ use super::merge::ensure_root_object;
 use super::path::ensure_path_safe_keys;
 use super::{SourceKind, SourceTrace};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 /// Custom serializable configuration layer.
 pub struct Layer {
     pub(super) trace: SourceTrace,
@@ -22,6 +23,16 @@ pub struct Layer {
     pub(super) indexed_array_paths: BTreeSet<String>,
     pub(super) indexed_array_base_lengths: BTreeMap<String, usize>,
     pub(super) direct_array_paths: BTreeSet<String>,
+}
+
+impl Debug for Layer {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Layer")
+            .field("trace", &self.trace)
+            .field("entry_count", &self.entries.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl Layer {

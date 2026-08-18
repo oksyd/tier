@@ -1,4 +1,3 @@
-use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::error::ConfigError;
@@ -12,7 +11,7 @@ use crate::loader::{Layer, PendingCustomLayer, SourceKind, SourceTrace};
 
 impl<T> LoadSession<T>
 where
-    T: Serialize + DeserializeOwned,
+    T: DeserializeOwned,
 {
     pub(super) fn collect_layers(&mut self) -> Result<(), ConfigError> {
         self.add_default_layer()?;
@@ -25,9 +24,9 @@ where
     }
 
     fn add_default_layer(&mut self) -> Result<(), ConfigError> {
-        let layer = Layer::from_serializable(
+        let layer = Layer::from_value(
             SourceTrace::new(SourceKind::Default, "defaults"),
-            &self.defaults,
+            self.defaults.clone(),
         )?;
         self.push_canonical_layer(layer)
     }

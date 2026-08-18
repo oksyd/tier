@@ -1,17 +1,12 @@
 use std::sync::Arc;
 
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::EnvDecoder;
 
 use super::super::ConfigLoader;
 
-impl<T> ConfigLoader<T>
-where
-    T: Serialize + DeserializeOwned,
-{
+impl<T> ConfigLoader<T> {
     /// Registers a built-in environment decoder for a configuration path.
     ///
     /// This is useful for operational formats such as comma-separated lists or

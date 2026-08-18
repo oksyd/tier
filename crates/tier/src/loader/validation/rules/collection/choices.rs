@@ -20,19 +20,28 @@ pub(in crate::loader::validation::rules) fn validate_one_of(
         return None;
     }
 
-    Some(validation_error(
-        path,
-        actual,
-        rule,
-        secret_paths,
-        &format!(
+    let sensitive = secret_paths
+        .iter()
+        .any(|secret| crate::path::path_overlaps_pattern(path, secret));
+    let message = if sensitive {
+        "must be one of the configured allowed values".to_owned()
+    } else {
+        format!(
             "must be one of {}",
             values
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(", ")
-        ),
+        )
+    };
+
+    Some(validation_error(
+        path,
+        actual,
+        rule,
+        secret_paths,
+        &message,
         Some(expected),
     ))
 }

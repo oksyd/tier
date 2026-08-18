@@ -1,5 +1,5 @@
 use serde::Serialize;
-use serde::de::DeserializeOwned;
+use serde_json::Value;
 
 use crate::ConfigMetadata;
 
@@ -14,13 +14,31 @@ mod patch;
 mod schema;
 mod sources;
 
-impl<T> ConfigLoader<T>
-where
-    T: Serialize + DeserializeOwned,
-{
-    /// Creates a loader with the provided in-code defaults.
+impl<T> ConfigLoader<T> {
+    /// Creates a loader with serializable in-code defaults.
+    ///
+    /// This constructor serializes `defaults` into the internal document. Use
+    /// [`Self::from_value`] for deserialize-only types and configurations that
+    /// contain [`crate::Secret`] fields.
     #[must_use]
-    pub fn new(defaults: T) -> Self {
+    pub fn new(defaults: T) -> Self
+    where
+        T: Serialize,
+    {
+        Self::from_defaults_result(serde_json::to_value(defaults))
+    }
+
+    /// Creates a loader from an explicit JSON-like default configuration document.
+    ///
+    /// This constructor does not require the target type to implement [`Serialize`]
+    /// and is therefore the preferred entry point for configurations containing
+    /// non-serializable secret fields.
+    #[must_use]
+    pub fn from_value(defaults: Value) -> Self {
+        Self::from_defaults_result(Ok(defaults))
+    }
+
+    fn from_defaults_result(defaults: Result<Value, serde_json::Error>) -> Self {
         Self {
             defaults,
             files: Vec::new(),
@@ -38,6 +56,7 @@ where
             custom_env_decoders: Default::default(),
             config_version: None,
             migrations: Vec::new(),
+            target: std::marker::PhantomData,
         }
     }
 }

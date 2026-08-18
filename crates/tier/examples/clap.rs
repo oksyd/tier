@@ -1,5 +1,10 @@
+#![allow(
+    dead_code,
+    reason = "configuration fields are consumed through serde and CLI diagnostics"
+)]
+
 use clap::Parser;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tier::{ConfigLoader, Secret, TierCli};
 
 #[derive(Debug, Parser)]
@@ -13,35 +18,21 @@ struct AppCli {
     config: TierCli,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct AppConfig {
     server: ServerConfig,
     db: DbConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct ServerConfig {
     host: String,
     port: u16,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct DbConfig {
     password: Secret<String>,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig {
-                host: "127.0.0.1".to_owned(),
-                port: 3000,
-            },
-            db: DbConfig {
-                password: Secret::new("default-secret".to_owned()),
-            },
-        }
-    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -49,7 +40,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let loaded = cli
         .config
-        .apply(ConfigLoader::new(AppConfig::default()).secret_path("db.password"))
+        .apply(
+            ConfigLoader::<AppConfig>::from_value(serde_json::json!({
+                "server": { "host": "127.0.0.1", "port": 3000 },
+                "db": { "password": "default-secret" }
+            }))
+            .secret_path("db.password"),
+        )
         .load()?;
 
     if let Some(output) = cli.config.render(&loaded)? {

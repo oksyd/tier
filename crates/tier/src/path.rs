@@ -15,7 +15,9 @@ pub(crate) use self::pattern::{
     normalize_path, path_child_segments, path_is_at_or_below, path_matches_pattern,
     path_overlaps_pattern, path_segments, path_starts_with_pattern,
 };
-pub(crate) use self::value::{collect_diff_paths, collect_paths, get_value_at_path, redact_value};
+pub(crate) use self::value::{
+    collect_diff_paths, collect_paths, get_value_at_path, redact_value, replace_value_at_path,
+};
 
 /// Builds a compile-time checked dot path from a config type.
 ///

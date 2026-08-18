@@ -73,6 +73,7 @@ where
         string_coercion_paths,
         Some(&known_paths),
         Some(&ignored),
+        None,
     );
     let result = serde_ignored::deserialize(deserializer, |path| {
         ignored

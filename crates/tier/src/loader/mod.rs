@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -46,13 +47,13 @@ use self::secret_path::SecretPathSpec;
 pub use self::source::{SourceKind, SourceTrace};
 pub(crate) use self::trace::is_secret_path;
 
-type Normalizer<T> = Box<dyn Fn(&mut T) -> Result<(), String> + Send + Sync>;
+type Normalizer = Box<dyn Fn(&mut Value) -> Result<(), String> + Send + Sync>;
 type Validator<T> = Box<dyn Fn(&T) -> Result<(), ValidationErrors> + Send + Sync>;
 type CustomEnvDecoder = Arc<dyn Fn(&str) -> Result<Value, String> + Send + Sync>;
 
-struct NamedNormalizer<T> {
+struct NamedNormalizer {
     name: String,
-    run: Normalizer<T>,
+    run: Normalizer,
 }
 
 struct NamedValidator<T> {
@@ -97,7 +98,7 @@ struct NamedValidator<T> {
 /// # Ok::<(), tier::ConfigError>(())
 /// ```
 pub struct ConfigLoader<T> {
-    defaults: T,
+    defaults: Result<Value, serde_json::Error>,
     files: Vec<FileSource>,
     env_sources: Vec<EnvSource>,
     args_source: Option<ArgsSource>,
@@ -105,7 +106,7 @@ pub struct ConfigLoader<T> {
     typed_arg_layers: Vec<DeferredPatchLayer>,
     metadata: ConfigMetadata,
     secret_paths: BTreeSet<SecretPathSpec>,
-    normalizers: Vec<NamedNormalizer<T>>,
+    normalizers: Vec<NamedNormalizer>,
     validators: Vec<NamedValidator<T>>,
     profile: Option<String>,
     unknown_field_policy: UnknownFieldPolicy,
@@ -113,4 +114,5 @@ pub struct ConfigLoader<T> {
     custom_env_decoders: BTreeMap<String, CustomEnvDecoder>,
     config_version: Option<(String, u32)>,
     migrations: Vec<ConfigMigration>,
+    target: PhantomData<fn() -> T>,
 }

@@ -20,7 +20,7 @@ pub use self::model::{
 };
 
 /// Stable version tag for machine-readable doctor and audit reports.
-pub const REPORT_FORMAT_VERSION: u32 = 2;
+pub const REPORT_FORMAT_VERSION: u32 = 3;
 
 #[cfg(feature = "schema")]
 /// Stable version tag for machine-readable export bundles.
@@ -36,6 +36,9 @@ pub const EXPORT_BUNDLE_FORMAT_VERSION: u32 = 1;
 /// - `explain()` shows how one path was resolved
 /// - `audit_report()` and `audit_json()` provide a machine-readable trace for
 ///   every resolved path
+///
+/// The report stores only a redacted snapshot. Its `Debug` output and public
+/// accessors therefore cannot expose the raw final configuration document.
 ///
 /// # Examples
 ///
@@ -63,7 +66,7 @@ pub const EXPORT_BUNDLE_FORMAT_VERSION: u32 = 1;
 /// # Ok::<(), tier::ConfigError>(())
 /// ```
 pub struct ConfigReport {
-    final_value: Value,
+    redacted_final: Value,
     secret_paths: BTreeSet<String>,
     alias_overrides: BTreeMap<String, String>,
     traces: BTreeMap<String, Vec<ResolutionStep>>,

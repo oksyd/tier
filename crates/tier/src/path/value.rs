@@ -78,6 +78,54 @@ pub(crate) fn get_value_at_path<'a>(value: &'a Value, path: &str) -> Option<&'a 
     Some(current)
 }
 
+pub(crate) fn replace_value_at_path(value: &mut Value, path: &str, replacement: Value) -> bool {
+    if path.is_empty() {
+        *value = replacement;
+        return true;
+    }
+
+    let segments = path.split('.').collect::<Vec<_>>();
+    let Some((last, parents)) = segments.split_last() else {
+        return false;
+    };
+    let mut current = value;
+    for segment in parents {
+        match current {
+            Value::Object(map) => {
+                let Some(next) = map.get_mut(*segment) else {
+                    return false;
+                };
+                current = next;
+            }
+            Value::Array(values) => {
+                let Ok(index) = parse_array_index_segment(segment) else {
+                    return false;
+                };
+                let Some(next) = values.get_mut(index) else {
+                    return false;
+                };
+                current = next;
+            }
+            _ => return false,
+        }
+    }
+
+    match current {
+        Value::Object(map) => map.insert((*last).to_owned(), replacement).is_some(),
+        Value::Array(values) => {
+            let Ok(index) = parse_array_index_segment(last) else {
+                return false;
+            };
+            let Some(slot) = values.get_mut(index) else {
+                return false;
+            };
+            *slot = replacement;
+            true
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn collect_diff_paths(
     before: &Value,
     after: &Value,

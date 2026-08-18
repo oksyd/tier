@@ -1,39 +1,28 @@
-use serde::{Deserialize, Serialize};
+#![allow(
+    dead_code,
+    reason = "configuration fields are consumed through serde and diagnostics"
+)]
+
+use serde::Deserialize;
 use tier::{ConfigLoader, ConfigMetadata, EnvSource, FieldMetadata, Secret};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct AppConfig {
     db: DbConfig,
     tls: TlsConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct DbConfig {
     url: String,
     password: Secret<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct TlsConfig {
     enabled: bool,
     cert: Option<String>,
     key: Option<String>,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            db: DbConfig {
-                url: "postgres://localhost/app".to_owned(),
-                password: Secret::new("default-secret".to_owned()),
-            },
-            tls: TlsConfig {
-                enabled: true,
-                cert: Some("/etc/tier/tls.crt".to_owned()),
-                key: Some("/etc/tier/tls.key".to_owned()),
-            },
-        }
-    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -53,10 +42,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ])
     .prefix("APP");
 
-    let loaded = ConfigLoader::new(AppConfig::default())
-        .metadata(metadata)
-        .env(env)
-        .load()?;
+    let loaded = ConfigLoader::<AppConfig>::from_value(serde_json::json!({
+        "db": {
+            "url": "postgres://localhost/app",
+            "password": "default-secret"
+        },
+        "tls": {
+            "enabled": true,
+            "cert": "/etc/tier/tls.crt",
+            "key": "/etc/tier/tls.key"
+        }
+    }))
+    .metadata(metadata)
+    .env(env)
+    .load()?;
 
     println!("{}", loaded.report().redacted_pretty_json());
     let explanation = loaded

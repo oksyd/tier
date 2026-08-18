@@ -1,14 +1,8 @@
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-
 use crate::{ConfigError, TierPatch};
 
 use super::super::{ConfigLoader, PendingCustomLayer, SourceKind, SourceTrace};
 
-impl<T> ConfigLoader<T>
-where
-    T: Serialize + DeserializeOwned,
-{
+impl<T> ConfigLoader<T> {
     /// Adds a typed sparse patch as a custom layer.
     ///
     /// This keeps sparse overrides typed and avoids maintaining a parallel

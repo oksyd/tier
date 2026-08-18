@@ -7,7 +7,28 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// Strongly typed secret wrapper.
 ///
 /// `Secret<T>` keeps config ergonomics while preventing accidental leaks in
-/// `Debug` and `Display` output.
+/// `Debug`, `Display`, and serde serialization.
+///
+/// Secret values intentionally do not implement [`Serialize`]. Exposing a
+/// secret to a serialized output must be explicit at the field declaration:
+///
+/// ```rust
+/// use serde::Serialize;
+/// use tier::Secret;
+///
+/// #[derive(Serialize)]
+/// struct Credentials {
+///     #[serde(serialize_with = "tier::secret::serialize_exposed")]
+///     token: Secret<String>,
+/// }
+/// ```
+///
+/// Accidental serialization is rejected at compile time:
+///
+/// ```compile_fail
+/// let secret = tier::Secret::new("do-not-export".to_owned());
+/// let _ = serde_json::to_string(&secret);
+/// ```
 #[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Secret<T>(T);
 
@@ -47,13 +68,16 @@ impl<T> Display for Secret<T> {
     }
 }
 
-impl<T: Serialize> Serialize for Secret<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.0.serialize(serializer)
-    }
+/// Explicitly serializes the inner value of a [`Secret`].
+///
+/// Use this function only through serde's `serialize_with` field attribute so
+/// every plaintext export remains visible and auditable at its call site.
+pub fn serialize_exposed<T, S>(value: &Secret<T>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    T: Serialize,
+    S: Serializer,
+{
+    value.expose_ref().serialize(serializer)
 }
 
 impl<'de, T> Deserialize<'de> for Secret<T>

@@ -1,14 +1,8 @@
 use std::path::PathBuf;
 
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-
 use super::super::{ArgsSource, ConfigLoader, EnvSource, FileSource, Layer, PendingCustomLayer};
 
-impl<T> ConfigLoader<T>
-where
-    T: Serialize + DeserializeOwned,
-{
+impl<T> ConfigLoader<T> {
     /// Adds a required configuration file.
     #[must_use]
     pub fn file(mut self, path: impl Into<PathBuf>) -> Self {

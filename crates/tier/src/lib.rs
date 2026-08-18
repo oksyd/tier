@@ -27,7 +27,8 @@ mod reload;
 mod report;
 #[cfg(feature = "schema")]
 mod schema;
-mod secret;
+/// Secret values and explicit plaintext serialization helpers.
+pub mod secret;
 mod value;
 
 #[cfg(feature = "clap")]
@@ -41,7 +42,8 @@ pub use crate::docs::{
     env_docs_report_json_pretty,
 };
 pub use crate::error::{
-    ConfigError, EnvironmentVariableComponent, UnknownField, ValidationError, ValidationErrors,
+    ConfigError, EnvironmentVariableComponent, PathProvenance, UnknownField, ValidationError,
+    ValidationErrors, ValidationFailure, ValidationFailures, ValidatorKind,
 };
 pub use crate::loader::{
     ArgsSource, ConfigLoader, ConfigMigration, ConfigMigrationKind, EnvSource, FileFormat,

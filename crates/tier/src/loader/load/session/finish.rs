@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
@@ -22,21 +21,18 @@ use crate::loader::load::validate::validate_loaded_config;
 use crate::loader::migration_runtime::{
     apply_config_migrations, normalize_version_registration_path,
 };
-use crate::loader::unknown::{
-    collect_known_paths, collect_known_paths_from_value, collect_suggestion_paths,
-};
+use crate::loader::unknown::{collect_known_paths_from_value, collect_suggestion_paths};
 
 impl<T> LoadSession<T>
 where
-    T: Serialize + DeserializeOwned,
+    T: DeserializeOwned,
 {
     pub(super) fn finish(mut self) -> Result<LoadedConfig<T>, ConfigError> {
         self.recanonicalize_metadata()?;
         let alias_overrides = self.metadata.alias_lookup_overrides()?;
         let pending_secret_paths =
             normalize_secret_registration_paths(&self.secret_paths, &self.metadata)?;
-        let defaults_value =
-            canonicalize_value_paths(&serde_json::to_value(&self.defaults)?, &self.metadata)?;
+        let defaults_value = canonicalize_value_paths(&self.defaults, &self.metadata)?;
         let secret_paths = canonicalize_secret_paths_against_layers(
             &pending_secret_paths,
             &defaults_value,
@@ -61,26 +57,13 @@ where
         let string_coercion_paths = merged_layers.string_coercion_paths;
 
         self.apply_migrations(&mut merged, &mut report)?;
-        let mut config = self.deserialize_config(
-            &merged,
-            &report,
-            &string_coercion_paths,
-            &pre_deserialize_suggestion_paths,
-        )?;
-        self.apply_post_deserialize_unknown_policy(
-            &config,
-            &merged,
-            &mut report,
-            &string_coercion_paths,
-        )?;
-
         let mut runtime_metadata = RuntimeMetadata {
             alias_overrides: self.metadata.alias_lookup_overrides()?,
             secret_paths,
         };
         run_normalizers(
-            self.normalizers,
-            &mut config,
+            std::mem::take(&mut self.normalizers),
+            &mut merged,
             &mut self.metadata,
             &pending_secret_paths,
             &mut runtime_metadata,
@@ -91,16 +74,36 @@ where
             runtime_metadata.secret_paths.clone(),
             runtime_metadata.alias_overrides.clone(),
         );
-        let final_value = validate_loaded_config(
+        let merged = canonicalize_value_paths(&merged, &self.metadata)?;
+        report.replace_final_value(merged.clone());
+        let (config, final_value) = self.deserialize_config(
+            &merged,
+            &report,
+            &string_coercion_paths,
+            &pre_deserialize_suggestion_paths,
+        )?;
+        report.replace_final_value(final_value.clone());
+        self.apply_post_deserialize_unknown_policy(
+            &final_value,
+            &pre_deserialize_suggestion_paths,
+            &mut report,
+            &string_coercion_paths,
+        )?;
+
+        validate_loaded_config(
             &config,
+            &final_value,
             &self.metadata,
             &runtime_metadata.secret_paths,
             &mut report,
-            self.validators,
+            std::mem::take(&mut self.validators),
         )?;
-        report.replace_final_value(final_value);
 
-        Ok(LoadedConfig { config, report })
+        Ok(LoadedConfig {
+            config,
+            report,
+            raw_final: final_value,
+        })
     }
 
     fn pre_deserialize_suggestion_paths(&self, defaults_value: &Value) -> BTreeMap<String, String> {
@@ -133,7 +136,7 @@ where
         report: &ConfigReport,
         string_coercion_paths: &BTreeSet<String>,
         pre_deserialize_suggestion_paths: &BTreeMap<String, String>,
-    ) -> Result<T, ConfigError> {
+    ) -> Result<(T, Value), ConfigError> {
         match deserialize_with_path(merged, report, string_coercion_paths) {
             Ok(config) => Ok(config),
             Err(error) => {
@@ -155,17 +158,15 @@ where
 
     fn apply_post_deserialize_unknown_policy(
         &self,
-        config: &T,
         merged: &Value,
+        suggestion_paths: &BTreeMap<String, String>,
         report: &mut ConfigReport,
         string_coercion_paths: &BTreeSet<String>,
     ) -> Result<(), ConfigError> {
-        let known_paths = collect_known_paths(config)?;
-        let suggestion_paths = collect_suggestion_paths(&self.metadata, &known_paths);
         apply_unknown_field_policy::<T>(
             self.unknown_field_policy,
             merged,
-            &suggestion_paths,
+            suggestion_paths,
             report,
             string_coercion_paths,
         )
