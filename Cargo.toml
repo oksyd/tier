@@ -18,7 +18,7 @@ notify = { version = "8.2.0", default-features = false, features = ["macos_fseve
 # Proc-macro toolchain.
 proc-macro2 = { version = "1.0.106", default-features = false, features = ["proc-macro"] }
 quote = { version = "1.0.45", default-features = false, features = ["proc-macro"] }
-syn = { version = "2.0.117", default-features = false, features = ["clone-impls", "derive", "extra-traits", "full", "parsing", "printing", "proc-macro"] }
+syn = { version = "3.0.3", default-features = false, features = ["clone-impls", "derive", "extra-traits", "full", "parsing", "printing", "proc-macro"] }
 
 # Serialization, schema, and config formats.
 regex = { version = "1.12.3", default-features = false, features = ["std", "unicode"] }
