@@ -18,7 +18,6 @@ ci:
     cargo nextest run --workspace --no-default-features --features derive
     cargo nextest run --workspace --no-default-features --features schema
     cargo doc --workspace --no-deps --all-features
-    RUSTDOCFLAGS='--cfg docsrs' cargo +nightly doc -p tier --all-features --no-deps
 
 bench:
   cargo bench -p tier --bench core
