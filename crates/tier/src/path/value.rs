@@ -149,7 +149,18 @@ pub(crate) fn collect_diff_paths(
             let before_child = before_map.get(key).unwrap_or(&Value::Null);
             let after_child = after_map.get(key).unwrap_or(&Value::Null);
             let next = join_path(current, key);
-            collect_diff_paths(before_child, after_child, &next, paths);
+            if !before_map.contains_key(key) || !after_map.contains_key(key) {
+                collect_paths(
+                    before_map
+                        .get(key)
+                        .or_else(|| after_map.get(key))
+                        .unwrap_or(&Value::Null),
+                    &next,
+                    paths,
+                );
+            } else {
+                collect_diff_paths(before_child, after_child, &next, paths);
+            }
         }
     } else if let (Value::Array(before_values), Value::Array(after_values)) = (before, after) {
         let len = before_values.len().max(after_values.len());
@@ -157,7 +168,18 @@ pub(crate) fn collect_diff_paths(
             let before_child = before_values.get(index).unwrap_or(&Value::Null);
             let after_child = after_values.get(index).unwrap_or(&Value::Null);
             let next = join_path(current, &index.to_string());
-            collect_diff_paths(before_child, after_child, &next, paths);
+            if index >= before_values.len() || index >= after_values.len() {
+                collect_paths(
+                    before_values
+                        .get(index)
+                        .or_else(|| after_values.get(index))
+                        .unwrap_or(&Value::Null),
+                    &next,
+                    paths,
+                );
+            } else {
+                collect_diff_paths(before_child, after_child, &next, paths);
+            }
         }
     } else {
         if matches!(before, Value::Object(_) | Value::Array(_)) {

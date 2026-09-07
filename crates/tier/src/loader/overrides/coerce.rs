@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
 
@@ -8,6 +8,7 @@ pub(in crate::loader) fn coerce_retry_scalars(
     value: &Value,
     current_path: &str,
     string_coercion_paths: &BTreeSet<String>,
+    observed_values: &BTreeMap<String, Value>,
 ) -> Value {
     match value {
         Value::Object(map) => Value::Object(
@@ -16,7 +17,7 @@ pub(in crate::loader) fn coerce_retry_scalars(
                     let next = join_path(current_path, key);
                     (
                         key.clone(),
-                        coerce_retry_scalars(child, &next, string_coercion_paths),
+                        coerce_retry_scalars(child, &next, string_coercion_paths, observed_values),
                     )
                 })
                 .collect(),
@@ -27,11 +28,16 @@ pub(in crate::loader) fn coerce_retry_scalars(
                 .enumerate()
                 .map(|(index, child)| {
                     let next = join_path(current_path, &index.to_string());
-                    coerce_retry_scalars(child, &next, string_coercion_paths)
+                    coerce_retry_scalars(child, &next, string_coercion_paths, observed_values)
                 })
                 .collect(),
         ),
-        Value::String(raw) if string_coercion_paths.contains(current_path) => {
+        Value::String(raw)
+            if string_coercion_paths.contains(current_path)
+                && !observed_values
+                    .get(current_path)
+                    .is_some_and(Value::is_string) =>
+        {
             retry_scalar_value(raw).unwrap_or_else(|| Value::String(raw.clone()))
         }
         other => other.clone(),

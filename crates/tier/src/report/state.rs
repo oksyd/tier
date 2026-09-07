@@ -34,6 +34,29 @@ impl ConfigReport {
         self.traces.entry(path).or_default().push(step);
     }
 
+    pub(crate) fn record_migrated_value(
+        &mut self,
+        from: &str,
+        to: &str,
+        value: &Value,
+        source: SourceTrace,
+    ) {
+        let value = redact_value(value, from, &self.secret_paths);
+        let value = redact_value(&value, to, &self.secret_paths);
+        let redacted = self
+            .secret_paths
+            .iter()
+            .any(|secret| path_overlaps_pattern(from, secret) || path_overlaps_pattern(to, secret));
+        self.record_step(
+            to.to_owned(),
+            ResolutionStep {
+                source,
+                value,
+                redacted,
+            },
+        );
+    }
+
     pub(crate) fn replace_final_value(&mut self, final_value: Value) {
         self.redacted_final = redact_value(&final_value, "", &self.secret_paths);
     }

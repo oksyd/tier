@@ -65,6 +65,21 @@ impl ConfigReport {
         &self.traces
     }
 
+    pub(crate) fn redact_diagnostic_message(&self, path: &str, message: String) -> String {
+        let path = normalize_lookup_path(
+            path,
+            &self.redacted_final,
+            &self.alias_overrides,
+            &self.traces,
+        )
+        .unwrap_or_else(|| path.to_owned());
+        if super::lookup::path_overlaps_secret(&path, &self.secret_paths) {
+            "invalid value at a sensitive configuration path (details redacted)".to_owned()
+        } else {
+            message
+        }
+    }
+
     pub(crate) fn latest_source_for(&self, path: &str) -> Option<SourceTrace> {
         let path = normalize_lookup_path(
             path,

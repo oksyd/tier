@@ -39,9 +39,6 @@ fn expand_named_field_metadata(
     let field_ident = named_field_ident(&field)?;
     let mut serde_attrs = parse_serde_field_attrs(&field.attrs, &field_ident, context)?;
     let mut attrs = parse_tier_attrs(&field.attrs)?;
-    if attrs.doc.is_none() {
-        attrs.doc = doc_comment(&field.attrs);
-    }
 
     if serde_attrs.skip_metadata {
         if attrs.has_any() {
@@ -58,6 +55,10 @@ fn expand_named_field_metadata(
             field_ident,
             "flattened fields cannot use tier metadata attributes",
         ));
+    }
+
+    if !serde_attrs.flatten && attrs.doc.is_none() {
+        attrs.doc = doc_comment(&field.attrs);
     }
 
     if let Some(conflicts) = conflicts {

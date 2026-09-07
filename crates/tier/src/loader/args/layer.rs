@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Map, Value};
 
 use crate::ConfigError;
-use crate::path::join_path;
+use crate::path::{join_path, path_is_at_or_below};
 
 use super::super::de::insert_path_with_shape_and_explicit_arrays;
 use super::super::overrides::ParsedOverride;
@@ -92,6 +92,8 @@ impl ArgsLayerState {
             arg: error_arg,
             message,
         })?;
+        self.coercible_string_paths
+            .retain(|existing| !path_is_at_or_below(existing, path));
         for suffix in string_coercion_suffixes {
             self.coercible_string_paths.insert(if suffix.is_empty() {
                 path.to_owned()

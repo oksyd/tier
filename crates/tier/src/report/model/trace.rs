@@ -12,6 +12,9 @@ pub struct ResolutionStep {
     /// Source that wrote the value.
     pub source: SourceTrace,
     /// Value contributed by the source.
+    ///
+    /// Array contributions use their destination indices. Null slots may be
+    /// sparse placeholders for elements that this source did not write.
     pub value: Value,
     /// Whether the recorded value was redacted.
     pub redacted: bool,

@@ -124,7 +124,9 @@ where
         };
         let mut chars = value.chars();
         match (chars.next(), chars.next()) {
-            (Some(ch), None) => visitor.visit_char(ch),
+            (Some(ch), None) => visitor.visit_char(ch).inspect(|_| {
+                self.record_coerced_value(value);
+            }),
             _ => Err(self.invalid_type(&visitor)),
         }
     }
@@ -134,7 +136,9 @@ where
         V: Visitor<'de>,
     {
         match self.value {
-            Value::String(value) => visitor.visit_borrowed_str(value),
+            Value::String(value) => visitor.visit_borrowed_str(value).inspect(|_| {
+                self.record_coerced_value(value);
+            }),
             _ => Err(self.invalid_type(&visitor)),
         }
     }
@@ -144,7 +148,9 @@ where
         V: Visitor<'de>,
     {
         match self.value {
-            Value::String(value) => visitor.visit_string(value.clone()),
+            Value::String(value) => visitor.visit_string(value.clone()).inspect(|_| {
+                self.record_coerced_value(value);
+            }),
             _ => Err(self.invalid_type(&visitor)),
         }
     }
@@ -154,7 +160,9 @@ where
         V: Visitor<'de>,
     {
         match self.value {
-            Value::String(value) => visitor.visit_borrowed_bytes(value.as_bytes()),
+            Value::String(value) => visitor.visit_borrowed_bytes(value.as_bytes()).inspect(|_| {
+                self.record_coerced_value(value);
+            }),
             _ => Err(self.invalid_type(&visitor)),
         }
     }
@@ -164,7 +172,13 @@ where
         V: Visitor<'de>,
     {
         match self.value {
-            Value::String(value) => visitor.visit_byte_buf(value.as_bytes().to_vec()),
+            Value::String(value) => {
+                visitor
+                    .visit_byte_buf(value.as_bytes().to_vec())
+                    .inspect(|_| {
+                        self.record_coerced_value(value);
+                    })
+            }
             _ => Err(self.invalid_type(&visitor)),
         }
     }
@@ -313,7 +327,11 @@ where
         V: Visitor<'de>,
     {
         match self.value {
-            Value::String(value) => visitor.visit_enum(value.as_str().into_deserializer()),
+            Value::String(value) => visitor
+                .visit_enum(value.as_str().into_deserializer())
+                .inspect(|_| {
+                    self.record_coerced_value(value);
+                }),
             Value::Object(map) => {
                 visitor.visit_enum(MapAccessDeserializer::new(CoercingMapAccess::new(
                     map.iter(),

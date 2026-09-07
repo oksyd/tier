@@ -10,7 +10,7 @@ use crate::loader::canonical::{
     canonicalize_metadata_against_value, canonicalize_secret_paths_against_value,
 };
 use crate::loader::indexed_array::validate_indexed_array_paths;
-use crate::loader::merge::{ensure_root_object, merge_values};
+use crate::loader::merge::{MergeEffects, ensure_root_object, merge_layer};
 use crate::loader::path::ensure_path_safe_keys;
 use crate::loader::policy::enforce_source_policies;
 use crate::loader::secret_path::SecretPathSpec;
@@ -38,23 +38,20 @@ pub(super) fn merge_layers_into_report(
     ensure_root_object(&merged)?;
 
     let mut string_coercion_paths = BTreeSet::new();
-    for layer in layers {
-        string_coercion_paths.extend(layer.coercible_string_paths.iter().cloned());
+    for mut layer in layers {
         validate_indexed_array_paths(&merged, &layer)?;
-        enforce_source_policies(&layer, metadata)?;
+        layer.expand_entry_traces();
+        let effects = if matches!(layer.trace.kind, SourceKind::Default) {
+            MergeEffects::default()
+        } else {
+            merge_layer(&mut merged, &layer, metadata)?
+        };
+        effects.update_coercion_paths(&mut string_coercion_paths, &layer);
+        record_deprecation_warnings(report, &layer, metadata, &effects);
+        effects.align_trace_layer(&mut layer);
+        enforce_source_policies(&layer, &effects, metadata)?;
         report.record_source(layer.trace.clone());
         record_layer_steps(report, &layer, secret_paths);
-        record_deprecation_warnings(report, &layer, metadata);
-        if !matches!(layer.trace.kind, SourceKind::Default) {
-            merge_values(
-                &mut merged,
-                layer.value,
-                "",
-                metadata,
-                &layer.indexed_array_paths,
-                &layer.direct_array_paths,
-            )?;
-        }
     }
 
     Ok(MergedLayers {

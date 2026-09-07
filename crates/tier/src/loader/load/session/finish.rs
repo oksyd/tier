@@ -54,9 +54,9 @@ where
             &mut report,
         )?;
         let mut merged = merged_layers.merged;
-        let string_coercion_paths = merged_layers.string_coercion_paths;
+        let mut string_coercion_paths = merged_layers.string_coercion_paths;
 
-        self.apply_migrations(&mut merged, &mut report)?;
+        self.apply_migrations(&mut merged, &mut string_coercion_paths, &mut report)?;
         let mut runtime_metadata = RuntimeMetadata {
             alias_overrides: self.metadata.alias_lookup_overrides()?,
             secret_paths,
@@ -114,6 +114,7 @@ where
     fn apply_migrations(
         &self,
         merged: &mut Value,
+        string_coercion_paths: &mut BTreeSet<String>,
         report: &mut ConfigReport,
     ) -> Result<(), ConfigError> {
         if let Some((version_path, current_version)) = &self.config_version {
@@ -123,6 +124,7 @@ where
                 &version_path,
                 *current_version,
                 &self.migrations,
+                string_coercion_paths,
                 report,
             )?;
         }

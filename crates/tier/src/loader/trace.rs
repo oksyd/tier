@@ -10,6 +10,7 @@ use crate::path::{
 use crate::report::{ConfigReport, ConfigWarning, DeprecatedField, ResolutionStep};
 use crate::value::values_equal;
 
+use super::merge::MergeEffects;
 use super::{Layer, SourceKind, SourceTrace};
 
 pub(super) fn record_layer_steps(
@@ -120,6 +121,7 @@ pub(super) fn record_deprecation_warnings(
     report: &mut ConfigReport,
     layer: &Layer,
     metadata: &ConfigMetadata,
+    effects: &MergeEffects,
 ) {
     if matches!(layer.trace.kind, SourceKind::Default) {
         return;
@@ -132,6 +134,7 @@ pub(super) fn record_deprecation_warnings(
 
     let mut warned = BTreeSet::new();
     for path in used_paths {
+        let path = effects.destination_path(&path);
         let Some(field) = metadata.effective_field_for(&path) else {
             continue;
         };

@@ -1,12 +1,15 @@
 use crate::{ConfigError, ConfigMetadata};
 
-use super::Layer;
+use super::{Layer, merge::MergeEffects};
 
 pub(super) fn enforce_source_policies(
     layer: &Layer,
+    effects: &MergeEffects,
     metadata: &ConfigMetadata,
 ) -> Result<(), ConfigError> {
-    for (path, trace) in &layer.entries {
+    // Removed descendants are writes by the replacing source, but have no
+    // overlay value and must remain separate from recorded layer entries.
+    for (path, trace) in layer.entries.iter().chain(&effects.removed_entries) {
         let Some(policy) = metadata.effective_source_policy_for(path) else {
             continue;
         };

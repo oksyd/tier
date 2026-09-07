@@ -13,6 +13,8 @@ use super::merge::ensure_root_object;
 use super::path::ensure_path_safe_keys;
 use super::{SourceKind, SourceTrace};
 
+mod entries;
+
 #[derive(Clone)]
 /// Custom serializable configuration layer.
 pub struct Layer {

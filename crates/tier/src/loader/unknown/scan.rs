@@ -25,7 +25,7 @@ where
     scan.result.map_err(|error| ConfigError::Deserialize {
         path: "<unknown>".to_owned(),
         provenance: None,
-        message: error.to_string(),
+        message: report.redact_diagnostic_message("", error.to_string()),
     })?;
 
     Ok(unknown_fields_from_paths(
@@ -56,6 +56,7 @@ struct UnknownFieldScan<T> {
     ignored: Vec<String>,
     known_paths: BTreeSet<String>,
     result: Result<T, ValueDeError>,
+    observed_values: BTreeMap<String, Value>,
 }
 
 fn scan_unknown_field_paths<T>(
@@ -66,6 +67,7 @@ where
     T: DeserializeOwned,
 {
     let ignored = RefCell::new(Vec::new());
+    let observed_values = RefCell::new(BTreeMap::new());
     let known_paths = RefCell::new(BTreeSet::new());
     let deserializer = crate::loader::de::CoercingDeserializer::new(
         value,
@@ -73,7 +75,7 @@ where
         string_coercion_paths,
         Some(&known_paths),
         Some(&ignored),
-        None,
+        Some(&observed_values),
     );
     let result = serde_ignored::deserialize(deserializer, |path| {
         ignored
@@ -87,6 +89,7 @@ where
         ignored,
         known_paths: known_paths.into_inner(),
         result,
+        observed_values: observed_values.into_inner(),
     }
 }
 
@@ -102,7 +105,7 @@ where
         return scan;
     }
 
-    let retry_value = coerce_retry_scalars(value, "", string_coercion_paths);
+    let retry_value = coerce_retry_scalars(value, "", string_coercion_paths, &scan.observed_values);
     if retry_value == *value {
         return scan;
     }

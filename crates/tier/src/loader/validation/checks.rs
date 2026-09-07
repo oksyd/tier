@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use crate::error::ValidationErrors;
 use crate::metadata::{ConfigMetadata, ValidationCheckSpec};
+use crate::path::path_overlaps_pattern;
 use crate::value::values_equal;
 
 use super::error::group_validation_error;
@@ -107,13 +108,21 @@ pub(super) fn validate_declared_checks(
                     let missing = missing_paths(value, &bound_requires);
                     if !missing.is_empty() {
                         let public_check = check.to_public();
+                        let displayed_equals = if secret_paths
+                            .iter()
+                            .any(|secret| path_overlaps_pattern(&matched_path, secret))
+                        {
+                            "***redacted***".to_owned()
+                        } else {
+                            equals.to_string()
+                        };
                         errors.push(group_validation_error(
                             &public_check,
                             std::iter::once(matched_path.clone()).chain(missing.iter().cloned()),
                             secret_paths,
                             &format!(
                                 "{matched_path} == {} requires {}",
-                                equals,
+                                displayed_equals,
                                 missing.join(", ")
                             ),
                             Some(serde_json::json!({

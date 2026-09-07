@@ -39,23 +39,27 @@ where
         );
         let result: Result<T, serde_path_to_error::Error<ValueDeError>> =
             serde_path_to_error::deserialize(deserializer);
-        result.map(|config| {
-            let mut effective = value.clone();
-            for (path, coerced) in coerced_values.into_inner() {
-                let _ = replace_value_at_path(&mut effective, &path, coerced);
-            }
-            (config, effective)
-        })
+        (result, coerced_values.into_inner())
+    };
+    let finish = |config, value: &Value, coerced_values: BTreeMap<String, Value>| {
+        let mut effective = value.clone();
+        for (path, coerced) in coerced_values {
+            let _ = replace_value_at_path(&mut effective, &path, coerced);
+        }
+        (config, effective)
     };
 
-    match deserialize_attempt(value) {
-        Ok(config) => Ok(config),
+    let (result, observed_values) = deserialize_attempt(value);
+    match result {
+        Ok(config) => Ok(finish(config, value, observed_values)),
         Err(error) => {
-            let retry_value = coerce_retry_scalars(value, "", string_coercion_paths);
-            if retry_value != *value
-                && let Ok(config) = deserialize_attempt(&retry_value)
-            {
-                return Ok(config);
+            let retry_value =
+                coerce_retry_scalars(value, "", string_coercion_paths, &observed_values);
+            if retry_value != *value {
+                let (retry_result, coerced_values) = deserialize_attempt(&retry_value);
+                if let Ok(config) = retry_result {
+                    return Ok(finish(config, &retry_value, coerced_values));
+                }
             }
             Err(deserialization_error(report, error))
         }
@@ -72,6 +76,6 @@ fn deserialization_error(
     ConfigError::Deserialize {
         path,
         provenance: source,
-        message: error.inner().to_string(),
+        message: report.redact_diagnostic_message(&lookup_path, error.inner().to_string()),
     }
 }
