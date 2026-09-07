@@ -1,8 +1,9 @@
+use crate::loader::de::ValueDeError;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
-use serde::de::{Error as _, Unexpected, Visitor, value::Error as ValueDeError};
+use serde::de::{Error as _, Unexpected, Visitor};
 use serde_json::Value;
 
 use crate::path::normalize_path;

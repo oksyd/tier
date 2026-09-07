@@ -33,12 +33,18 @@ where
         let pending_secret_paths =
             normalize_secret_registration_paths(&self.secret_paths, &self.metadata)?;
         let defaults_value = canonicalize_value_paths(&self.defaults, &self.metadata)?;
-        let secret_paths = canonicalize_secret_paths_against_layers(
+        let mut secret_paths = canonicalize_secret_paths_against_layers(
             &pending_secret_paths,
             &defaults_value,
             &self.layers,
             &self.metadata,
         )?;
+        if let Some(discover) = self.dynamic_secret_paths {
+            secret_paths.extend(discover(&defaults_value));
+            for layer in &self.layers {
+                secret_paths.extend(discover(&layer.value));
+            }
+        }
         let pre_deserialize_suggestion_paths =
             self.pre_deserialize_suggestion_paths(&defaults_value);
         let mut report = ConfigReport::new(
@@ -59,17 +65,21 @@ where
         self.apply_migrations(&mut merged, &mut string_coercion_paths, &mut report)?;
         let mut runtime_metadata = RuntimeMetadata {
             alias_overrides: self.metadata.alias_lookup_overrides()?,
-            secret_paths,
+            secret_paths: report.secret_paths().clone(),
         };
         run_normalizers(
             std::mem::take(&mut self.normalizers),
             &mut merged,
             &mut self.metadata,
             &pending_secret_paths,
+            &mut string_coercion_paths,
             &mut runtime_metadata,
             &mut report,
         )?;
 
+        if let Some(discover) = self.dynamic_secret_paths {
+            runtime_metadata.secret_paths.extend(discover(&merged));
+        }
         report.replace_runtime_metadata(
             runtime_metadata.secret_paths.clone(),
             runtime_metadata.alias_overrides.clone(),
@@ -124,6 +134,7 @@ where
                 &version_path,
                 *current_version,
                 &self.migrations,
+                &self.metadata,
                 string_coercion_paths,
                 report,
             )?;

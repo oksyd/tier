@@ -34,6 +34,16 @@ impl ConfigReport {
         self.traces.entry(path).or_default().push(step);
     }
 
+    pub(crate) fn secret_paths(&self) -> &BTreeSet<String> {
+        &self.secret_paths
+    }
+
+    pub(crate) fn extend_secret_paths(&mut self, paths: impl IntoIterator<Item = String>) {
+        let mut secrets = self.secret_paths.clone();
+        secrets.extend(paths);
+        self.replace_runtime_metadata(secrets, self.alias_overrides.clone());
+    }
+
     pub(crate) fn record_migrated_value(
         &mut self,
         from: &str,

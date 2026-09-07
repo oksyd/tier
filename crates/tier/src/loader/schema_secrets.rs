@@ -106,3 +106,106 @@ fn collect_secret_paths_from_schema(
         }
     }
 }
+
+/// Follow recursive schemas alongside the finite input value. Reference cycles
+/// at the same value are stopped; descending into a child starts a new chain.
+pub(super) fn secret_paths_for_value<T: schemars::JsonSchema>(value: &Value) -> BTreeSet<String> {
+    let schema = crate::schema::json_schema_for::<T>();
+    let mut paths = BTreeSet::new();
+    collect_value_secrets(
+        &schema,
+        &schema,
+        value,
+        "",
+        &mut paths,
+        &mut BTreeSet::new(),
+    );
+    paths
+}
+
+fn collect_value_secrets(
+    schema: &Value,
+    root: &Value,
+    value: &Value,
+    path: &str,
+    paths: &mut BTreeSet<String>,
+    refs: &mut BTreeSet<String>,
+) {
+    let Some(object) = schema.as_object() else {
+        return;
+    };
+    if ["writeOnly", "x-tier-secret"]
+        .iter()
+        .any(|key| object.get(*key).and_then(Value::as_bool) == Some(true))
+    {
+        if !path.is_empty() {
+            paths.insert(path.to_owned());
+        }
+        return;
+    }
+    if let Some(reference) = object.get("$ref").and_then(Value::as_str)
+        && refs.insert(reference.to_owned())
+    {
+        if let Some(target) = resolve_schema_ref(root, reference) {
+            collect_value_secrets(target, root, value, path, paths, refs);
+        }
+        refs.remove(reference);
+    }
+    for key in ["allOf", "anyOf", "oneOf"] {
+        if let Some(children) = object.get(key).and_then(Value::as_array) {
+            for child in children {
+                collect_value_secrets(child, root, value, path, paths, refs);
+            }
+        }
+    }
+    match value {
+        Value::Object(values) => {
+            for (key, value) in values {
+                let next = join_path(path, key);
+                let mut matched = false;
+                if let Some(child) = object.get("properties").and_then(|props| props.get(key)) {
+                    matched = true;
+                    collect_value_secrets(child, root, value, &next, paths, &mut BTreeSet::new());
+                }
+                if let Some(patterns) = object.get("patternProperties").and_then(Value::as_object) {
+                    for (pattern, child) in patterns {
+                        if regex::Regex::new(pattern).is_ok_and(|re| re.is_match(key)) {
+                            matched = true;
+                            collect_value_secrets(
+                                child,
+                                root,
+                                value,
+                                &next,
+                                paths,
+                                &mut BTreeSet::new(),
+                            );
+                        }
+                    }
+                }
+                if !matched && let Some(child) = object.get("additionalProperties") {
+                    collect_value_secrets(child, root, value, &next, paths, &mut BTreeSet::new());
+                }
+            }
+        }
+        Value::Array(values) => {
+            for (index, value) in values.iter().enumerate() {
+                let next = join_path(path, &index.to_string());
+                let tuple = object
+                    .get("prefixItems")
+                    .or_else(|| object.get("items").filter(|v| v.is_array()));
+                let child = tuple
+                    .and_then(Value::as_array)
+                    .and_then(|items| items.get(index))
+                    .or_else(|| object.get("items").filter(|v| !v.is_array()))
+                    .or_else(|| legacy_additional_items_for_schema(object));
+                if let Some(child) = child {
+                    collect_value_secrets(child, root, value, &next, paths, &mut BTreeSet::new());
+                }
+                if let Some(child) = object.get("contains") {
+                    collect_value_secrets(child, root, value, &next, paths, &mut BTreeSet::new());
+                }
+            }
+        }
+        _ => {}
+    }
+}

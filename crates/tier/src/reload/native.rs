@@ -7,7 +7,7 @@ use std::sync::mpsc::{self, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{RecursiveMode, Watcher};
 
 use crate::ConfigError;
 
@@ -18,7 +18,6 @@ use super::{ReloadHandle, ReloadOptions};
 
 /// Handle for a background native filesystem watcher.
 pub struct NativeWatcher {
-    watcher: Option<RecommendedWatcher>,
     stop: Option<Sender<WatchMessage>>,
     join: Option<JoinHandle<()>>,
 }
@@ -33,7 +32,7 @@ impl NativeWatcher {
     where
         T: Send + Sync + 'static,
     {
-        let targets = prepare_watch_targets(paths)?;
+        let targets = prepare_watch_targets(paths.clone())?;
         if targets.is_empty() {
             return Err(ConfigError::Watch {
                 message: "at least one path must be watched".to_owned(),
@@ -54,11 +53,11 @@ impl NativeWatcher {
                 .map_err(map_watch_error)?;
         }
 
-        let join =
-            thread::spawn(move || run_native_watch_loop(handle, targets, rx, debounce, options));
+        let join = thread::spawn(move || {
+            run_native_watch_loop(handle, paths, targets, watcher, rx, debounce, options)
+        });
 
         Ok(Self {
-            watcher: Some(watcher),
             stop: Some(tx),
             join: Some(join),
         })
@@ -70,7 +69,6 @@ impl NativeWatcher {
     }
 
     fn shutdown(&mut self) {
-        self.watcher.take();
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(WatchMessage::Stop);
         }

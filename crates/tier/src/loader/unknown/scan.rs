@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::loader::de::ValueDeError;
 use serde::de::DeserializeOwned;
-use serde::de::value::Error as ValueDeError;
 use serde_json::Value;
 
 use crate::error::{ConfigError, UnknownField};
@@ -105,15 +105,35 @@ where
         return scan;
     }
 
-    let retry_value = coerce_retry_scalars(value, "", string_coercion_paths, &scan.observed_values);
-    if retry_value == *value {
+    let Some(error) = scan.result.as_ref().err() else {
         return scan;
+    };
+    let mut retry_value = coerce_retry_scalars(
+        value,
+        "",
+        string_coercion_paths,
+        &scan.observed_values,
+        error,
+    );
+    for _ in 0..=string_coercion_paths.len() {
+        if retry_value == *value {
+            break;
+        }
+        let retry_scan = scan_unknown_field_paths::<T>(&retry_value, string_coercion_paths);
+        let Some(error) = retry_scan.result.as_ref().err() else {
+            return retry_scan;
+        };
+        let next = coerce_retry_scalars(
+            &retry_value,
+            "",
+            string_coercion_paths,
+            &retry_scan.observed_values,
+            error,
+        );
+        if next == retry_value {
+            break;
+        }
+        retry_value = next;
     }
-
-    let retry_scan = scan_unknown_field_paths::<T>(&retry_value, string_coercion_paths);
-    if retry_scan.result.is_ok() {
-        retry_scan
-    } else {
-        scan
-    }
+    scan
 }

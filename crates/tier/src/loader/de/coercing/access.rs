@@ -1,10 +1,8 @@
+use crate::loader::de::ValueDeError;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::de::{
-    DeserializeSeed, Error as _, IntoDeserializer, MapAccess, SeqAccess,
-    value::Error as ValueDeError,
-};
+use serde::de::{DeserializeSeed, Error as _, IntoDeserializer, MapAccess, SeqAccess};
 use serde_json::Value;
 
 use crate::path::join_path;

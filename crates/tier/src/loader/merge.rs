@@ -105,7 +105,7 @@ impl MergeContext<'_> {
                     self.merge(&mut target[index], value, &child_path)?;
                 }
             }
-            (target, overlay) if strategy == MergeStrategy::Replace && !path.is_empty() => {
+            (target, overlay) if strategy == MergeStrategy::Replace => {
                 self.replace(target, overlay, path);
             }
             (Value::Array(target), Value::Array(overlay)) if strategy == MergeStrategy::Append => {

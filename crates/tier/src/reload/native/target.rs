@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::ConfigError;
@@ -35,9 +35,46 @@ pub(super) struct WatchRegistration {
 pub(super) fn prepare_watch_targets(paths: Vec<PathBuf>) -> Result<Vec<WatchTarget>, ConfigError> {
     let mut targets = Vec::new();
     for path in paths {
-        targets.push(watch_target_for_path(absolutize_path(&path)?)?);
+        expand_watch_path(absolutize_path(&path)?, &mut targets, &mut BTreeSet::new())?;
     }
     Ok(targets)
+}
+
+fn expand_watch_path(
+    path: PathBuf,
+    targets: &mut Vec<WatchTarget>,
+    seen: &mut BTreeSet<PathBuf>,
+) -> Result<(), ConfigError> {
+    if !seen.insert(path.clone()) || seen.len() > 64 {
+        return Ok(());
+    }
+    let ancestors: Vec<_> = path.ancestors().collect();
+    for ancestor in ancestors.into_iter().rev() {
+        if std::fs::symlink_metadata(ancestor).is_ok_and(|m| m.file_type().is_symlink()) {
+            // Watch the link entry through its parent, including directory links.
+            let parent = ancestor.parent().unwrap_or(ancestor);
+            let (watch_root, recursive) = watch_root_for_parent(parent)?;
+            targets.push(WatchTarget {
+                path: ancestor.to_path_buf(),
+                kind: WatchTargetKind::File,
+                watch_root,
+                recursive,
+            });
+            if let Ok(destination) = std::fs::read_link(ancestor) {
+                let destination = if destination.is_absolute() {
+                    destination
+                } else {
+                    parent.join(destination)
+                };
+                if let Ok(suffix) = path.strip_prefix(ancestor) {
+                    expand_watch_path(destination.join(suffix), targets, seen)?;
+                }
+            }
+            return Ok(());
+        }
+    }
+    targets.push(watch_target_for_path(path)?);
+    Ok(())
 }
 
 fn watch_target_for_path(path: PathBuf) -> Result<WatchTarget, ConfigError> {

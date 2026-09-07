@@ -1,6 +1,7 @@
+use crate::loader::de::ValueDeError;
 use std::str::FromStr;
 
-use serde::de::{Visitor, value::Error as ValueDeError};
+use serde::de::Visitor;
 use serde_json::Value;
 
 use super::model::CoercingDeserializer;

@@ -67,8 +67,31 @@ impl<'a> MigrationMetadata<'a> {
         &mut self,
         value: &Value,
         report: &mut ConfigReport,
+        config_metadata: &crate::ConfigMetadata,
         destination: impl Fn(&str) -> Option<String>,
-    ) {
+    ) -> Result<(), ConfigError> {
+        let mut secrets = BTreeSet::new();
+        for (path, (origin, trace)) in &self.sources {
+            let Some(target) = destination(path) else {
+                continue;
+            };
+            if target == *path {
+                continue;
+            }
+            super::policy::enforce_source_policy(&target, trace, config_metadata)?;
+            for secret in report.secret_paths() {
+                if crate::path::path_starts_with_pattern(path, secret)
+                    || crate::path::path_starts_with_pattern(origin, secret)
+                {
+                    secrets.insert(target.clone());
+                }
+                if crate::path::path_starts_with_pattern(&target, secret) {
+                    secrets.insert(origin.clone());
+                    secrets.insert(path.clone());
+                }
+            }
+        }
+        report.extend_secret_paths(secrets);
         *self.string_coercion_paths = self
             .string_coercion_paths
             .iter()
@@ -85,6 +108,7 @@ impl<'a> MigrationMetadata<'a> {
                 Some((target, (origin, source)))
             })
             .collect();
+        Ok(())
     }
 }
 
@@ -160,6 +184,7 @@ pub(super) fn apply_config_migrations(
     version_path: &MigrationPathSpec,
     current_version: u32,
     migrations: &[ConfigMigration],
+    config_metadata: &crate::ConfigMetadata,
     string_coercion_paths: &mut BTreeSet<String>,
     report: &mut ConfigReport,
 ) -> Result<(), ConfigError> {
@@ -198,7 +223,14 @@ pub(super) fn apply_config_migrations(
 
         let from_version = working_version;
         for migration in &sorted[group_start..migration_index] {
-            apply_config_migration(merged, migration, from_version, &mut metadata, report)?;
+            apply_config_migration(
+                merged,
+                migration,
+                from_version,
+                &mut metadata,
+                config_metadata,
+                report,
+            )?;
         }
 
         working_version = since_version;
@@ -223,6 +255,7 @@ fn apply_config_migration(
     migration: &ConfigMigration,
     from_version: u32,
     metadata: &mut MigrationMetadata<'_>,
+    config_metadata: &crate::ConfigMetadata,
     report: &mut ConfigReport,
 ) -> Result<(), ConfigError> {
     match &migration.kind {
@@ -253,6 +286,22 @@ fn apply_config_migration(
 
             let keep_target = has_explicit_target
                 && matches!(conflict_policy, MigrationConflictPolicy::KeepTarget);
+            if !keep_target {
+                for (path, (_, trace)) in &metadata.sources {
+                    if let Some(suffix) = subtree_suffix(path, &from.path) {
+                        super::policy::enforce_source_policy(
+                            &format!("{}{suffix}", to.path),
+                            trace,
+                            config_metadata,
+                        )?;
+                    } else if let Some(suffix) = subtree_suffix(path, &to.path)
+                        && get_value_at_path(merged, &format!("{}{suffix}", from.path)).is_none()
+                        && let Some((_, trace)) = metadata.sources.get(&from.path)
+                    {
+                        super::policy::enforce_source_policy(path, trace, config_metadata)?;
+                    }
+                }
+            }
             let value = take_value_at_path(merged, &from.path);
             if !keep_target && let Some(value) = value {
                 insert_normalized_path(merged, &to.path, &to.explicit_array_segments, value)
@@ -261,7 +310,7 @@ fn apply_config_migration(
                         message: format!("failed to apply migration: {message}"),
                     })?;
             }
-            metadata.remap(merged, report, |path| {
+            metadata.remap(merged, report, config_metadata, |path| {
                 if let Some(suffix) = subtree_suffix(path, &from.path) {
                     (!keep_target).then(|| format!("{}{suffix}", to.path))
                 } else if !keep_target && subtree_suffix(path, &to.path).is_some() {
@@ -269,7 +318,7 @@ fn apply_config_migration(
                 } else {
                     Some(path.to_owned())
                 }
-            });
+            })?;
             report.record_migration(AppliedMigration {
                 kind: "rename".to_owned(),
                 from_version,
@@ -284,9 +333,9 @@ fn apply_config_migration(
             let path = canonicalize_migration_path(merged, &path, "migration path")?;
             let array_element = removed_array_element(merged, &path.path);
             if take_value_at_path(merged, &path.path).is_some() {
-                metadata.remap(merged, report, |candidate| {
+                metadata.remap(merged, report, config_metadata, |candidate| {
                     path_after_removal(candidate, &path.path, array_element.as_ref())
-                });
+                })?;
                 report.record_migration(AppliedMigration {
                     kind: "remove".to_owned(),
                     from_version,

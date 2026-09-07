@@ -52,3 +52,35 @@ fn metadata_secret_path_specs(
             )
         })
 }
+
+pub(super) fn redact_source_error(
+    mut error: ConfigError,
+    secrets: &BTreeSet<String>,
+    metadata: &ConfigMetadata,
+) -> ConfigError {
+    if secrets.is_empty() {
+        return error;
+    }
+    match &mut error {
+        // Parse errors do not reliably identify a field and may quote entire
+        // source lines. Keep the file and location while suppressing the excerpt.
+        ConfigError::ParseFile { message, .. } => {
+            *message = "invalid configuration syntax (source details redacted)".to_owned();
+        }
+        ConfigError::InvalidEnv { path, message, .. } => {
+            let path = metadata
+                .canonicalize_alias_path_with_array_segments(path, &Default::default())
+                .map(|(path, _)| path)
+                .unwrap_or_else(|_| path.clone());
+            if secrets
+                .iter()
+                .any(|secret| crate::path::path_overlaps_pattern(&path, secret))
+            {
+                *message =
+                    "invalid value at a sensitive configuration path (details redacted)".to_owned();
+            }
+        }
+        _ => {}
+    }
+    error
+}

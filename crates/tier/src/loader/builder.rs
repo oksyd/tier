@@ -48,6 +48,7 @@ impl<T> ConfigLoader<T> {
             typed_arg_layers: Vec::new(),
             metadata: ConfigMetadata::default(),
             secret_paths: Default::default(),
+            dynamic_secret_paths: None,
             normalizers: Vec::new(),
             validators: Vec::new(),
             profile: None,

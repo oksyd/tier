@@ -2,7 +2,8 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::de::DeserializeOwned;
-use serde::de::value::Error as ValueDeError;
+mod error;
+pub(in crate::loader) use error::ValueDeError;
 use serde_json::Value;
 
 use crate::error::ConfigError;
@@ -53,12 +54,33 @@ where
     match result {
         Ok(config) => Ok(finish(config, value, observed_values)),
         Err(error) => {
-            let retry_value =
-                coerce_retry_scalars(value, "", string_coercion_paths, &observed_values);
-            if retry_value != *value {
+            let mut retry_value = coerce_retry_scalars(
+                value,
+                "",
+                string_coercion_paths,
+                &observed_values,
+                error.inner(),
+            );
+            for _ in 0..=string_coercion_paths.len() {
+                if retry_value == *value {
+                    break;
+                }
                 let (retry_result, coerced_values) = deserialize_attempt(&retry_value);
-                if let Ok(config) = retry_result {
-                    return Ok(finish(config, &retry_value, coerced_values));
+                match retry_result {
+                    Ok(config) => return Ok(finish(config, &retry_value, coerced_values)),
+                    Err(retry_error) => {
+                        let next = coerce_retry_scalars(
+                            &retry_value,
+                            "",
+                            string_coercion_paths,
+                            &coerced_values,
+                            retry_error.inner(),
+                        );
+                        if next == retry_value {
+                            break;
+                        }
+                        retry_value = next;
+                    }
                 }
             }
             Err(deserialization_error(report, error))

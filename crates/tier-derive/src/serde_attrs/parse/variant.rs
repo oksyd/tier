@@ -50,14 +50,14 @@ pub(crate) fn parse_serde_variant_attrs(
         })?;
     }
 
-    let canonical_name = rename_serialize
+    let serialize_name = rename_serialize
         .or_else(|| {
             container_attrs
                 .rename_all_serialize
                 .map(|rule| rule.apply_to_variant(&base_name))
         })
         .unwrap_or_else(|| base_name.clone());
-    let deserialize_name = rename_deserialize
+    let canonical_name = rename_deserialize
         .or_else(|| {
             container_attrs
                 .rename_all_deserialize
@@ -65,8 +65,8 @@ pub(crate) fn parse_serde_variant_attrs(
         })
         .unwrap_or_else(|| base_name.clone());
 
-    if deserialize_name != canonical_name {
-        aliases.push(deserialize_name);
+    if serialize_name != canonical_name {
+        aliases.push(serialize_name);
     }
 
     aliases.retain(|alias| alias != &canonical_name);

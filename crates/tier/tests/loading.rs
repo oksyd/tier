@@ -2618,10 +2618,11 @@ fn root_metadata_env_decoders_are_rejected() {
 }
 
 #[test]
-fn root_metadata_merge_strategies_are_rejected() {
-    let metadata = ConfigMetadata::from_fields([
-        FieldMetadata::new(".").merge_strategy(MergeStrategy::Replace)
-    ]);
+fn root_metadata_append_strategy_is_rejected() {
+    let metadata =
+        ConfigMetadata::from_fields(
+            [FieldMetadata::new(".").merge_strategy(MergeStrategy::Append)],
+        );
 
     let error = ConfigLoader::new(AppConfig::default())
         .metadata(metadata)

@@ -391,6 +391,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 names, aliases, secret handling, `serde(default)` awareness, merge strategies,
 declared validation rules, env docs, and deprecation warnings.
 
+For directional serde renames, deserialization names are the canonical paths
+used by metadata and reports. Serialization names remain accepted input aliases,
+so serialized defaults still load. Object-shaped enums can be used at the root;
+each overriding layer replaces the entire enum document, so it must include
+the desired variant and its required fields.
+
 ## Declarative Validation
 
 `tier` supports metadata-driven field and cross-field validation alongside

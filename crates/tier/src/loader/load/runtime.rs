@@ -65,6 +65,7 @@ pub(super) fn run_normalizers(
     config: &mut Value,
     metadata: &mut ConfigMetadata,
     pending_secret_paths: &BTreeSet<SecretPathSpec>,
+    string_coercion_paths: &mut BTreeSet<String>,
     runtime_metadata: &mut RuntimeMetadata,
     report: &mut ConfigReport,
 ) -> Result<(), ConfigError> {
@@ -75,13 +76,22 @@ pub(super) fn run_normalizers(
             message,
         })?;
         let after = config.clone();
+        string_coercion_paths.retain(|path| {
+            crate::path::get_value_at_path(&before, path)
+                == crate::path::get_value_at_path(&after, path)
+        });
         ensure_root_object(&after)?;
         ensure_path_safe_keys(&after, "")?;
 
         *metadata = canonicalize_metadata_against_value(metadata, &after)?;
         runtime_metadata.alias_overrides = metadata.alias_lookup_overrides()?;
-        runtime_metadata.secret_paths =
-            canonicalize_secret_paths_against_value(pending_secret_paths, &after, metadata)?;
+        runtime_metadata
+            .secret_paths
+            .extend(canonicalize_secret_paths_against_value(
+                pending_secret_paths,
+                &after,
+                metadata,
+            )?);
 
         let trace = SourceTrace::new(SourceKind::Normalization, normalizer.name.clone());
         report.record_source(trace.clone());

@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::path::join_path;
 
-pub(in crate::loader) fn coerce_retry_scalars(
+fn coerce_all_scalars(
     value: &Value,
     current_path: &str,
     string_coercion_paths: &BTreeSet<String>,
@@ -17,7 +17,7 @@ pub(in crate::loader) fn coerce_retry_scalars(
                     let next = join_path(current_path, key);
                     (
                         key.clone(),
-                        coerce_retry_scalars(child, &next, string_coercion_paths, observed_values),
+                        coerce_all_scalars(child, &next, string_coercion_paths, observed_values),
                     )
                 })
                 .collect(),
@@ -28,7 +28,7 @@ pub(in crate::loader) fn coerce_retry_scalars(
                 .enumerate()
                 .map(|(index, child)| {
                     let next = join_path(current_path, &index.to_string());
-                    coerce_retry_scalars(child, &next, string_coercion_paths, observed_values)
+                    coerce_all_scalars(child, &next, string_coercion_paths, observed_values)
                 })
                 .collect(),
         ),
@@ -50,4 +50,27 @@ fn retry_scalar_value(raw: &str) -> Option<Value> {
         Value::Null | Value::Bool(_) | Value::Number(_) => Some(value),
         _ => None,
     }
+}
+
+pub(in crate::loader) fn coerce_retry_scalars(
+    value: &Value,
+    current_path: &str,
+    paths: &BTreeSet<String>,
+    observed: &BTreeMap<String, Value>,
+    error: &crate::loader::de::ValueDeError,
+) -> Value {
+    if let Some(pointer) = error.rejected_string {
+        let mut retry = value.clone();
+        for path in paths {
+            if let Some(Value::String(raw)) = crate::path::get_value_at_path(value, path)
+                && raw.as_ptr() as usize == pointer
+                && let Some(converted) = retry_scalar_value(raw)
+            {
+                crate::path::replace_value_at_path(&mut retry, path, converted);
+                break;
+            }
+        }
+        return retry;
+    }
+    coerce_all_scalars(value, current_path, paths, observed)
 }

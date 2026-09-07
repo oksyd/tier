@@ -106,6 +106,7 @@ pub struct ConfigLoader<T> {
     typed_arg_layers: Vec<DeferredPatchLayer>,
     metadata: ConfigMetadata,
     secret_paths: BTreeSet<SecretPathSpec>,
+    dynamic_secret_paths: Option<fn(&Value) -> BTreeSet<String>>,
     normalizers: Vec<NamedNormalizer>,
     validators: Vec<NamedValidator<T>>,
     profile: Option<String>,

@@ -697,7 +697,8 @@ fn derive_metadata_tracks_serde_rename_rules_aliases_and_skip_deserializing() {
     let metadata = SerdeNamingConfig::metadata();
 
     let host = metadata.field("bindHost").expect("bindHost metadata");
-    assert!(host.aliases().contains(&"bind-host".to_owned()));
+    assert_eq!(host.path(), "bind-host");
+    assert!(host.aliases().contains(&"bindHost".to_owned()));
     assert!(host.aliases().contains(&"bind_addr".to_owned()));
     assert_eq!(
         host.documentation(),

@@ -36,7 +36,8 @@ fn validate_root_restrictions(field: &FieldMetadata) -> Result<(), ConfigError> 
             message: "aliases cannot rewrite the root path".to_owned(),
         });
     }
-    if field.path.is_empty() && field.merge_explicit {
+    if field.path.is_empty() && field.merge_explicit && field.merge != crate::MergeStrategy::Replace
+    {
         return Err(root_error(
             field,
             "merge strategies cannot target the root path",
