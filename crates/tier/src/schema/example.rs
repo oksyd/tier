@@ -64,6 +64,18 @@ pub(super) fn build_example_value(
         return Some(redact_if_secret(example, is_secret));
     }
 
+    if let Some(example) = object
+        .get("examples")
+        .and_then(Value::as_array)
+        .and_then(|examples| {
+            examples
+                .iter()
+                .find(|value| value_satisfies_schema(value, schema, root))
+        })
+    {
+        return Some(redact_if_secret(example, is_secret));
+    }
+
     if let Some(default) = valid_schema_annotation("default", schema, object, root) {
         return Some(redact_if_secret(default, is_secret));
     }

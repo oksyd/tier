@@ -17,6 +17,10 @@ use self::worker::run_native_watch_loop;
 use super::{ReloadHandle, ReloadOptions};
 
 /// Handle for a background native filesystem watcher.
+///
+/// Keep this handle alive while watching. Dropping it stops the watcher and
+/// waits for any reload already in progress.
+#[must_use = "dropping the watcher stops background reloads"]
 pub struct NativeWatcher {
     stop: Option<Sender<WatchMessage>>,
     join: Option<JoinHandle<()>>,
@@ -48,8 +52,8 @@ impl NativeWatcher {
         .map_err(map_watch_error)?;
 
         for registration in &registrations {
-            watcher
-                .watch(&registration.root, registration.mode())
+            registration
+                .register(&mut watcher)
                 .map_err(map_watch_error)?;
         }
 
@@ -91,6 +95,15 @@ fn map_watch_error(error: notify::Error) -> ConfigError {
 }
 
 impl target::WatchRegistration {
+    fn register(&self, watcher: &mut impl Watcher) -> notify::Result<()> {
+        match watcher.watch(&self.root, self.mode()) {
+            Err(error) if self.required => Err(error),
+            // Ancestor watches improve replacement detection, but callers may
+            // only have traversal permission on those directories.
+            _ => Ok(()),
+        }
+    }
+
     fn mode(&self) -> RecursiveMode {
         if self.recursive {
             RecursiveMode::Recursive

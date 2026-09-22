@@ -118,12 +118,67 @@ pub(in crate::loader) fn canonicalize_secret_paths_against_layers(
     layers: &[Layer],
     metadata: &ConfigMetadata,
 ) -> Result<BTreeSet<String>, ConfigError> {
-    let mut current =
-        canonicalize_secret_path_specs_against_value(secret_paths, defaults_value, metadata)?;
-    for layer in layers {
-        current = canonicalize_secret_path_specs_against_value(&current, &layer.value, metadata)?;
+    canonicalize_secret_paths_for_values(
+        secret_paths,
+        std::iter::once(defaults_value).chain(layers.iter().map(|layer| &layer.value)),
+        metadata,
+    )
+}
+
+fn canonicalize_secret_paths_for_values<'a>(
+    secret_paths: &BTreeSet<SecretPathSpec>,
+    values: impl IntoIterator<Item = &'a Value>,
+    metadata: &ConfigMetadata,
+) -> Result<BTreeSet<String>, ConfigError> {
+    if secret_paths.is_empty() {
+        return Ok(BTreeSet::new());
     }
-    Ok(current.into_iter().map(SecretPathSpec::into_path).collect())
+    let values: Vec<_> = values
+        .into_iter()
+        .map(|value| {
+            let mut paths = Vec::new();
+            crate::path::collect_paths(value, "", &mut paths);
+            (value, paths)
+        })
+        .collect();
+    let mut result = BTreeSet::new();
+    for spec in secret_paths {
+        let mut matched = false;
+        let mut error = None;
+        for (value, present) in &values {
+            match canonicalize_secret_path_specs_against_value(
+                &BTreeSet::from([spec.clone()]),
+                value,
+                metadata,
+            ) {
+                Ok(paths) => {
+                    for path in paths {
+                        if !matched {
+                            matched = present.iter().any(|candidate| {
+                                crate::path::path_starts_with_pattern(candidate, path.path())
+                                    || (crate::path::path_overlaps_pattern(candidate, path.path())
+                                        && matches!(
+                                            crate::path::get_value_at_path(value, candidate),
+                                            Some(Value::Array(_))
+                                        ))
+                            });
+                        }
+                        result.insert(path.into_path());
+                    }
+                }
+                Err(invalid) => {
+                    error.get_or_insert(invalid);
+                }
+            }
+        }
+        // A path valid in an earlier shape still protects historical values.
+        // Empty arrays and future indices are valid secret registrations too.
+        // Reject incompatible registrations with no matching value or array shape.
+        if !matched && let Some(error) = error {
+            return Err(error);
+        }
+    }
+    Ok(result)
 }
 
 pub(in crate::loader) fn canonicalize_secret_paths_against_value(

@@ -535,6 +535,13 @@ assert!(matches!(
 # }
 ```
 
+When handling schema-related CLI commands, call
+`cli.config.render_schema::<AppConfig>()` before loading configuration (requires
+`schema`, with `AppConfig: JsonSchema + TierMetadata`). If it returns `Some(output)`,
+print the output and exit. This lets users generate schemas, environment docs,
+and configuration examples before they have supplied required settings. Otherwise,
+load the configuration and use `render_with_schema(&loaded)` for runtime commands.
+
 ## Environment Variable Docs
 
 With `schema` enabled, `tier` can generate environment variable docs and

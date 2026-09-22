@@ -152,20 +152,20 @@ impl TierCli {
     /// Converts parsed CLI flags into an [`ArgsSource`] suitable for [`ConfigLoader`].
     #[must_use]
     pub fn to_args_source(&self) -> ArgsSource {
-        let mut args = vec!["tier".to_owned()];
+        let mut args = vec![std::ffi::OsString::from("tier")];
         for path in &self.config {
-            args.push("--config".to_owned());
-            args.push(path.display().to_string());
+            args.push("--config".into());
+            args.push(path.as_os_str().to_owned());
         }
         if let Some(profile) = &self.profile {
-            args.push("--profile".to_owned());
-            args.push(profile.clone());
+            args.push("--profile".into());
+            args.push(profile.into());
         }
         for assignment in &self.set {
-            args.push("--set".to_owned());
-            args.push(assignment.clone());
+            args.push("--set".into());
+            args.push(assignment.into());
         }
-        ArgsSource::from_args(args)
+        ArgsSource::from_os_args(args)
     }
 
     /// Applies CLI-derived overrides onto an existing [`ConfigLoader`].
@@ -223,22 +223,38 @@ impl TierCli {
     where
         T: JsonSchema + TierMetadata,
     {
+        if let Some(output) = self.render_schema::<T>() {
+            Ok(Some(output))
+        } else {
+            self.render(loaded)
+        }
+    }
+
+    #[cfg(feature = "schema")]
+    /// Renders schema, environment documentation, or example commands without
+    /// loading configuration. Returns `None` for commands that require a load.
+    ///
+    /// Call this before `ConfigLoader::load` so users can obtain a template even
+    /// when required configuration values or files are not yet available.
+    #[must_use]
+    pub fn render_schema<T>(&self) -> Option<String>
+    where
+        T: JsonSchema + TierMetadata,
+    {
         match self.command() {
-            TierCliCommand::PrintConfigSchema => Ok(Some(annotated_json_schema_pretty::<T>())),
-            TierCliCommand::PrintEnvDocs => {
-                Ok(Some(env_docs_markdown::<T>(&self.env_doc_options())))
-            }
+            TierCliCommand::PrintConfigSchema => Some(annotated_json_schema_pretty::<T>()),
+            TierCliCommand::PrintEnvDocs => Some(env_docs_markdown::<T>(&self.env_doc_options())),
             TierCliCommand::PrintConfigExample => {
                 #[cfg(feature = "toml")]
                 {
-                    Ok(Some(config_example_toml::<T>()))
+                    Some(config_example_toml::<T>())
                 }
                 #[cfg(not(feature = "toml"))]
                 {
-                    Ok(Some(config_example_pretty::<T>()))
+                    Some(config_example_pretty::<T>())
                 }
             }
-            _ => self.render(loaded),
+            _ => None,
         }
     }
 }
@@ -247,6 +263,7 @@ impl TierCli {
 fn schema_render_error(arg: &str) -> ConfigError {
     ConfigError::InvalidArg {
         arg: arg.to_owned(),
-        message: "schema commands require TierCli::render_with_schema".to_owned(),
+        message: "schema commands require TierCli::render_schema or TierCli::render_with_schema"
+            .to_owned(),
     }
 }

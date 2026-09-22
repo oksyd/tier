@@ -30,10 +30,17 @@ impl SerdeFieldContext {
         }
     }
 
-    pub(crate) fn for_enum_variant_fields(container_attrs: &SerdeContainerAttrs) -> Self {
+    pub(crate) fn for_enum_variant_fields(
+        container_attrs: &SerdeContainerAttrs,
+        variant_attrs: &SerdeVariantAttrs,
+    ) -> Self {
         Self {
-            rename_serialize: container_attrs.rename_all_fields_serialize,
-            rename_deserialize: container_attrs.rename_all_fields_deserialize,
+            rename_serialize: variant_attrs
+                .rename_all_serialize
+                .or(container_attrs.rename_all_fields_serialize),
+            rename_deserialize: variant_attrs
+                .rename_all_deserialize
+                .or(container_attrs.rename_all_fields_deserialize),
             default_fields: false,
         }
     }
@@ -50,6 +57,8 @@ pub(crate) struct SerdeFieldAttrs {
 
 #[derive(Debug, Default)]
 pub(crate) struct SerdeVariantAttrs {
+    pub(crate) rename_all_serialize: Option<RenameRule>,
+    pub(crate) rename_all_deserialize: Option<RenameRule>,
     pub(crate) canonical_name: String,
     pub(crate) aliases: Vec<String>,
     pub(crate) skip_metadata: bool,

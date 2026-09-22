@@ -59,6 +59,18 @@ pub(super) fn apply_field_metadata(
         entry.denied_sources = policy.denied_sources_vec();
     }
 
+    // Secrets apply to a whole subtree, while other field annotations only
+    // apply to the matching field. Include ancestors without inheriting their
+    // examples, validation rules, or environment variable names.
+    let segments = crate::path::path_segments(&entry.path);
+    entry.secret |= (0..segments.len()).any(|depth| {
+        let ancestor = segments[..depth].join(".");
+        metadata
+            .matching_fields_for_path_with_intent(&ancestor, &explicit_array_segments)
+            .iter()
+            .any(|field| field.secret)
+    });
+
     if entry.secret && entry.example.is_some() {
         entry.example = Some("<secret>".to_owned());
     }

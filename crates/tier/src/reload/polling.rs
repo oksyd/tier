@@ -7,6 +7,10 @@ use std::time::{Duration, SystemTime};
 use super::{ReloadFailurePolicy, ReloadHandle, ReloadOptions};
 
 /// Handle for a background polling watcher.
+///
+/// Keep this handle alive while watching. Dropping it stops the watcher and
+/// waits for any reload already in progress.
+#[must_use = "dropping the watcher stops background reloads"]
 pub struct PollingWatcher {
     stop: Sender<()>,
     join: Option<JoinHandle<()>>,
@@ -79,6 +83,10 @@ fn effective_interval(interval: Duration) -> Duration {
 #[derive(PartialEq, Eq)]
 struct PathState {
     modified: Option<SystemTime>,
+    len: Option<u64>,
+    created: Option<SystemTime>,
+    #[cfg(unix)]
+    identity: Option<(u64, u64, i64, i64)>,
     link: Option<LinkState>,
 }
 
@@ -121,6 +129,20 @@ fn collect_mtimes_recursive(
             modified: metadata
                 .as_ref()
                 .and_then(|metadata| metadata.modified().ok()),
+            len: metadata.as_ref().map(std::fs::Metadata::len),
+            created: metadata
+                .as_ref()
+                .and_then(|metadata| metadata.created().ok()),
+            #[cfg(unix)]
+            identity: metadata.as_ref().map(|metadata| {
+                use std::os::unix::fs::MetadataExt;
+                (
+                    metadata.dev(),
+                    metadata.ino(),
+                    metadata.ctime(),
+                    metadata.ctime_nsec(),
+                )
+            }),
             link,
         },
     );

@@ -15,7 +15,6 @@ pub(super) fn expand_patch_enum(
     container_attrs: &SerdeContainerAttrs,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut variant_arms = Vec::new();
-    let context = SerdeFieldContext::for_enum_variant_fields(container_attrs);
 
     for variant in data_enum.variants {
         let variant_ident = variant.ident.clone();
@@ -67,6 +66,7 @@ pub(super) fn expand_patch_enum(
             quote! { ::std::string::String::from(__tier_prefix) }
         };
 
+        let context = SerdeFieldContext::for_enum_variant_fields(container_attrs, &serde_attrs);
         match variant.fields {
             Fields::Named(fields) => {
                 let mut bindings = Vec::new();

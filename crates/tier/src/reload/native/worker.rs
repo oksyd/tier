@@ -1,7 +1,7 @@
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use super::event::{WatchMessage, reload_deadline_for_event};
+use super::event::{EventReaction, WatchMessage, reject_watch_error, reload_deadline_for_event};
 use super::target::{WatchTarget, collect_watch_registrations, prepare_watch_targets};
 use crate::reload::{ReloadFailurePolicy, ReloadHandle, ReloadOptions};
 use notify::{RecommendedWatcher, Watcher};
@@ -19,36 +19,44 @@ pub(super) fn run_native_watch_loop<T>(
     T: Send + Sync + 'static,
 {
     loop {
-        let Some(deadline) = wait_for_first_reload_deadline(&handle, &targets, &rx, debounce)
+        let Some(deadline) =
+            wait_for_first_reload_deadline(&handle, &targets, &rx, debounce, &options)
         else {
             return;
         };
-        let Some(()) = collect_debounced_events(&handle, &targets, &rx, debounce, deadline) else {
+        let Some(()) =
+            collect_debounced_events(&handle, &targets, &rx, debounce, deadline, &options)
+        else {
             return;
         };
 
         // Link replacements can point outside the original watch roots. Rebuild
         // subscriptions before loading the new target and observing future edits.
+        let mut watch_error = None;
         match prepare_watch_targets(paths.clone()) {
             Ok(next) => {
                 let old = collect_watch_registrations(&targets);
                 let new = collect_watch_registrations(&next);
-                for registration in &new {
-                    if !old.iter().any(|r| {
-                        r.root == registration.root && r.recursive == registration.recursive
-                    }) && let Err(error) = watcher.watch(&registration.root, registration.mode())
-                    {
-                        handle.record_error_message(format!("watch error: {error}"));
-                    }
-                }
+                // An unchanged path may now refer to a new directory inode.
+                // Reset registrations before loading so the next snapshot and
+                // subsequent events both refer to the current filesystem tree.
                 for registration in &old {
-                    if !new.iter().any(|r| r.root == registration.root) {
-                        let _ = watcher.unwatch(&registration.root);
+                    let _ = watcher.unwatch(&registration.root);
+                }
+                for registration in &new {
+                    if let Err(error) = registration.register(&mut watcher) {
+                        watch_error = Some(format!("watch error: {error}"));
                     }
                 }
                 targets = next;
             }
-            Err(error) => handle.record_error_message(error.to_string()),
+            Err(error) => watch_error = Some(error.to_string()),
+        }
+        if let Some(error) = watch_error {
+            if reject_watch_error(&handle, error, &options) {
+                return;
+            }
+            continue;
         }
 
         if handle.reload_with_options(&options).is_err()
@@ -64,14 +72,16 @@ fn wait_for_first_reload_deadline<T>(
     targets: &[WatchTarget],
     rx: &Receiver<WatchMessage>,
     debounce: Duration,
+    options: &ReloadOptions,
 ) -> Option<Instant> {
     loop {
         match rx.recv() {
             Ok(WatchMessage::Stop) | Err(_) => return None,
             Ok(WatchMessage::Event(event)) => {
-                if let Some(deadline) = reload_deadline_for_event(handle, targets, event, debounce)
-                {
-                    return Some(deadline);
+                match reload_deadline_for_event(handle, targets, event, debounce, options) {
+                    EventReaction::Reload(deadline) => return Some(deadline),
+                    EventReaction::Stop => return None,
+                    EventReaction::Ignore => {}
                 }
             }
         }
@@ -84,6 +94,7 @@ fn collect_debounced_events<T>(
     rx: &Receiver<WatchMessage>,
     debounce: Duration,
     mut deadline: Instant,
+    options: &ReloadOptions,
 ) -> Option<()> {
     loop {
         let timeout = deadline.saturating_duration_since(Instant::now());
@@ -91,10 +102,10 @@ fn collect_debounced_events<T>(
             Ok(WatchMessage::Stop) | Err(RecvTimeoutError::Disconnected) => return None,
             Err(RecvTimeoutError::Timeout) => return Some(()),
             Ok(WatchMessage::Event(event)) => {
-                if let Some(next_deadline) =
-                    reload_deadline_for_event(handle, targets, event, debounce)
-                {
-                    deadline = next_deadline;
+                match reload_deadline_for_event(handle, targets, event, debounce, options) {
+                    EventReaction::Reload(next_deadline) => deadline = next_deadline,
+                    EventReaction::Stop => return None,
+                    EventReaction::Ignore => {}
                 }
             }
         }

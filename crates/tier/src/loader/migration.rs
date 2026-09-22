@@ -68,6 +68,9 @@ pub struct ConfigMigration {
 
 impl ConfigMigration {
     /// Creates a rename migration from `from` to `to`.
+    ///
+    /// Both paths accept metadata aliases. A rename whose paths resolve to the
+    /// same canonical field is a no-op.
     #[must_use]
     pub fn rename(from: impl Into<String>, to: impl Into<String>, since_version: u32) -> Self {
         Self::rename_with_policy(from, to, since_version, MigrationConflictPolicy::Error)

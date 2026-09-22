@@ -1,7 +1,7 @@
 use super::ReloadSummary;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-/// Policy applied when a background watcher encounters a reload failure.
+/// Policy applied when a background watcher encounters a reload or watch failure.
 pub enum ReloadFailurePolicy {
     /// Keep the last good configuration and continue watching for future changes.
     #[default]
@@ -13,7 +13,7 @@ pub enum ReloadFailurePolicy {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 /// Options controlling watcher-side reload behavior.
 pub struct ReloadOptions {
-    /// Behavior applied after a failed reload.
+    /// Behavior applied after a failed reload or native watcher error.
     pub on_error: ReloadFailurePolicy,
     /// Whether to emit success events even when the effective configuration did not change.
     pub emit_unchanged: bool,

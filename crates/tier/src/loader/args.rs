@@ -15,6 +15,7 @@ pub(super) mod layer;
 ///
 /// `ArgsSource` parses the same `--config`, `--profile`, and `--set key=value`
 /// flags that `tier` accepts through its reusable `clap` integration.
+/// Parsing stops at `--`, leaving subsequent arguments to the application.
 ///
 /// # Examples
 ///
@@ -77,6 +78,7 @@ impl ArgsSource {
 
     /// Creates an argument source from potentially non-Unicode platform arguments.
     ///
+    /// Values following `--config` retain their native path encoding.
     /// Encoding errors are returned by [`ConfigLoader::load`](super::ConfigLoader::load)
     /// rather than causing a process-wide panic.
     #[must_use]
@@ -110,30 +112,28 @@ pub(super) fn parse_args(source: ArgsSource) -> Result<ParsedArgs, ConfigError> 
         ArgsInput::Process => std::env::args_os().collect(),
         ArgsInput::Explicit(args) => args,
     };
-    let args = args
-        .into_iter()
-        .enumerate()
-        .map(|(index, arg)| {
-            arg.into_string()
-                .map_err(|_| ConfigError::NonUnicodeArgument { index })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().enumerate();
     let mut files = Vec::new();
     let mut profile = None;
     let mut overrides = Vec::new();
 
-    while let Some(arg) = args.next() {
+    while let Some((index, arg)) = args.next() {
+        let arg = arg
+            .into_string()
+            .map_err(|_| ConfigError::NonUnicodeArgument { index })?;
+        if arg == "--" {
+            break;
+        }
         if let Some(value) = arg.strip_prefix("--config=") {
             files.push(FileSource::new(value));
             continue;
         }
 
         if arg == "--config" {
-            let value = args.next().ok_or_else(|| ConfigError::MissingArgValue {
+            let (_, value) = args.next().ok_or_else(|| ConfigError::MissingArgValue {
                 flag: "--config".to_owned(),
             })?;
-            files.push(FileSource::new(value));
+            files.push(FileSource::new(std::path::PathBuf::from(value)));
             continue;
         }
 
@@ -143,18 +143,14 @@ pub(super) fn parse_args(source: ArgsSource) -> Result<ParsedArgs, ConfigError> 
         }
 
         if arg == "--profile" {
-            profile = Some(args.next().ok_or_else(|| ConfigError::MissingArgValue {
-                flag: "--profile".to_owned(),
-            })?);
+            profile = Some(next_string_arg(&mut args, "--profile")?);
             continue;
         }
 
         let set_value = if let Some(value) = arg.strip_prefix("--set=") {
             Some(value.to_owned())
         } else if arg == "--set" {
-            Some(args.next().ok_or_else(|| ConfigError::MissingArgValue {
-                flag: "--set".to_owned(),
-            })?)
+            Some(next_string_arg(&mut args, "--set")?)
         } else {
             None
         };
@@ -206,4 +202,16 @@ pub(super) fn parse_args(source: ArgsSource) -> Result<ParsedArgs, ConfigError> 
         files,
         overrides,
     })
+}
+
+fn next_string_arg(
+    args: &mut impl Iterator<Item = (usize, OsString)>,
+    flag: &str,
+) -> Result<String, ConfigError> {
+    let (index, value) = args.next().ok_or_else(|| ConfigError::MissingArgValue {
+        flag: flag.to_owned(),
+    })?;
+    value
+        .into_string()
+        .map_err(|_| ConfigError::NonUnicodeArgument { index })
 }

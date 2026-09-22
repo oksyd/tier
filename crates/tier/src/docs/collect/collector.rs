@@ -42,6 +42,24 @@ impl<'a, 'docs> EnvDocCollector<'a, 'docs> {
         required: bool,
         scope_reserved_keys: Option<&BTreeSet<String>>,
     ) {
+        let first = self.docs.len();
+        self.collect_node(schema, path, required, scope_reserved_keys);
+        if schema.get("writeOnly").and_then(Value::as_bool) == Some(true)
+            || schema.get("x-tier-secret").and_then(Value::as_bool) == Some(true)
+        {
+            for entry in &mut self.docs[first..] {
+                entry.secret = true;
+            }
+        }
+    }
+
+    fn collect_node(
+        &mut self,
+        schema: &Value,
+        path: &str,
+        required: bool,
+        scope_reserved_keys: Option<&BTreeSet<String>>,
+    ) {
         if self.collect_ref(schema, path, required, scope_reserved_keys) {
             return;
         }

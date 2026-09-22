@@ -25,3 +25,17 @@ Supported metadata includes:
 
 Most users should depend on `tier` with the `derive` feature enabled and use
 the re-exported `tier::TierConfig` derive macro.
+
+For internally tagged, adjacently tagged, and untagged enums, fields shared by
+multiple variants keep their security metadata. A path marked secret in any
+variant is redacted in all variants. Allowed source sets are intersected and
+denied source sets are combined, including policies on nested fields; incompatible
+combined policies produce a metadata error when loading. Variant-specific
+validation rules on shared fields are omitted because they cannot safely apply
+to every variant. Prefer distinct field paths when variants need different
+security policies. Ambiguous aliases keep their security metadata without being
+rewritten to a single variant's field path.
+
+Variant-level `serde(rename_all)` overrides the enum's `rename_all_fields` for
+that variant. Directional renames use deserialization names for configuration
+paths and preserve serialization names as input aliases.

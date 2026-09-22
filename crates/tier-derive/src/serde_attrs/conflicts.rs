@@ -17,7 +17,6 @@ pub(crate) fn non_external_variant_field_conflicts(
         return Ok(NonExternalFieldConflicts::default());
     }
 
-    let context = SerdeFieldContext::for_enum_variant_fields(container_attrs);
     let mut counts = HashMap::<String, usize>::new();
     let mut canonical_names = HashSet::new();
     let mut alias_owners = HashMap::<String, HashSet<String>>::new();
@@ -34,6 +33,7 @@ pub(crate) fn non_external_variant_field_conflicts(
             continue;
         };
 
+        let context = SerdeFieldContext::for_enum_variant_fields(container_attrs, &variant_attrs);
         let mut seen = HashSet::new();
         for field in &fields.named {
             let Some(field_ident) = &field.ident else {

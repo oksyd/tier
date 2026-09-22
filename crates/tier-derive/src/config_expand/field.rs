@@ -1,4 +1,4 @@
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{FieldsNamed, LitStr};
 
 use crate::attr::parse_tier_attrs;
@@ -61,12 +61,23 @@ fn expand_named_field_metadata(
         attrs.doc = doc_comment(&field.attrs);
     }
 
+    let mut security_tokens = Vec::new();
     if let Some(conflicts) = conflicts {
         if conflicts
             .skipped_fields
             .contains(&serde_attrs.canonical_name)
         {
-            return Ok(Vec::new());
+            return expand_security_metadata(field, context, accumulator, &[]);
+        }
+        let discarded_aliases = serde_attrs
+            .aliases
+            .iter()
+            .filter(|alias| conflicts.skipped_aliases.contains(*alias))
+            .map(|alias| LitStr::new(alias, field_ident.span()))
+            .collect::<Vec<_>>();
+        if !discarded_aliases.is_empty() {
+            security_tokens =
+                expand_security_metadata(field.clone(), context, accumulator, &discarded_aliases)?;
         }
         serde_attrs
             .aliases
@@ -104,7 +115,7 @@ fn expand_named_field_metadata(
         quote! { <#metadata_ty as ::tier::TierMetadata>::metadata() }
     };
 
-    Ok(vec![
+    security_tokens.extend([
         quote! {
             #accumulator.extend(::tier::metadata::prefixed_metadata(
                 #canonical_name_lit,
@@ -120,5 +131,58 @@ fn expand_named_field_metadata(
             &attrs,
             is_secret_type(metadata_ty),
         )?,
-    ])
+    ]);
+    Ok(security_tokens)
+}
+
+fn expand_security_metadata(
+    field: syn::Field,
+    context: SerdeFieldContext,
+    accumulator: &proc_macro2::Ident,
+    only_aliases: &[LitStr],
+) -> syn::Result<Vec<proc_macro2::TokenStream>> {
+    let security_accumulator = format_ident!("__tier_security_metadata");
+    let tokens = expand_named_field_metadata(field, context, &security_accumulator, None)?;
+    let selected = if only_aliases.is_empty() {
+        quote! { true }
+    } else {
+        quote! {
+            [#(#only_aliases),*].iter().any(|alias| {
+                __tier_path == *alias
+                    || __tier_path.strip_prefix(alias).is_some_and(|suffix| suffix.starts_with('.'))
+            })
+        }
+    };
+    Ok(vec![quote! {
+        {
+            let mut #security_accumulator = ::tier::ConfigMetadata::new();
+            #(#tokens)*
+            for (__tier_path, __tier_field) in #security_accumulator.fields_by_path() {
+                if __tier_field.is_secret()
+                    || __tier_field.allowed_sources().is_some()
+                    || __tier_field.denied_sources().is_some()
+                {
+                    // Protect accepted aliases without introducing ambiguous
+                    // alias rewrites between enum variants.
+                    for __tier_path in ::std::iter::once(__tier_path)
+                        .chain(__tier_field.aliases().iter().cloned())
+                    {
+                        if #selected {
+                            let mut __tier_security = ::tier::FieldMetadata::new(__tier_path);
+                            if __tier_field.is_secret() {
+                                __tier_security = __tier_security.secret();
+                            }
+                            if let Some(__tier_allowed) = __tier_field.allowed_sources() {
+                                __tier_security = __tier_security.allow_sources(__tier_allowed.iter().copied());
+                            }
+                            if let Some(__tier_denied) = __tier_field.denied_sources() {
+                                __tier_security = __tier_security.deny_sources(__tier_denied.iter().copied());
+                            }
+                            #accumulator.push(__tier_security);
+                        }
+                    }
+                }
+            }
+        }
+    }])
 }

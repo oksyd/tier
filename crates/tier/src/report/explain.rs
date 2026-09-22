@@ -21,24 +21,36 @@ impl ConfigReport {
             &self.alias_overrides,
             &self.traces,
         )?;
-        let redacted = path_overlaps_secret(&normalized, &self.secret_paths);
+        self.explain_recorded_path(&normalized)
+    }
+
+    pub(super) fn explain_recorded_path(&self, normalized: &str) -> Option<Explanation> {
+        let redacted = path_overlaps_secret(normalized, &self.secret_paths);
         let steps = self
             .traces
-            .get(&normalized)?
+            .get(normalized)?
             .iter()
             .cloned()
             .map(|mut step| {
                 if redacted {
-                    step.value = redact_value(&step.value, &normalized, &self.secret_paths);
+                    step.value = redact_value(&step.value, normalized, &self.secret_paths);
                     step.redacted = true;
                 }
                 step
             })
             .collect();
-        let final_value = get_value_at_path(&self.redacted_final, &normalized).cloned();
+        let final_value = normalize_lookup_path(
+            normalized,
+            &self.redacted_final,
+            &self.alias_overrides,
+            &self.traces,
+        )
+        .filter(|path| path == normalized)
+        .and_then(|path| get_value_at_path(&self.redacted_final, &path))
+        .cloned();
 
         Some(Explanation {
-            path: normalized,
+            path: normalized.to_owned(),
             final_value,
             steps,
             redacted,

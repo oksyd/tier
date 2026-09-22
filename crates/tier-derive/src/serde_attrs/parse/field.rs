@@ -81,7 +81,7 @@ pub(crate) fn parse_serde_field_attrs(
         })
         .unwrap_or_else(|| base_name.clone());
 
-    if serialize_name != canonical_name {
+    if !flatten && serialize_name != canonical_name {
         aliases.push(serialize_name);
     }
 

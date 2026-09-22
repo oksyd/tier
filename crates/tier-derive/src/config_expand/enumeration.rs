@@ -42,7 +42,7 @@ pub(super) fn expand_enum_metadata(
             Fields::Named(fields) => {
                 let field_tokens = expand_named_fields_metadata(
                     fields,
-                    SerdeFieldContext::for_enum_variant_fields(container_attrs),
+                    SerdeFieldContext::for_enum_variant_fields(container_attrs, &variant_attrs),
                     &format_ident!("variant_metadata"),
                     Some(&conflicts),
                 )?;
@@ -90,6 +90,34 @@ fn push_variant_tokens(
         .map(|alias| LitStr::new(alias, span))
         .collect::<Vec<_>>();
 
+    let merge_security = quote! {
+        // A shared path can be sensitive or restricted in any enum variant.
+        // Merging policies must never let a later variant weaken an earlier one.
+        let __tier_existing_fields = metadata.fields_by_path();
+        for (__tier_path, mut __tier_field) in variant_metadata.fields_by_path() {
+            if let Some(__tier_existing) = __tier_existing_fields.get(&__tier_path) {
+                let __tier_allowed = match (__tier_existing.allowed_sources(), __tier_field.allowed_sources()) {
+                    (Some(left), Some(right)) => Some(left.intersection(right).copied().collect::<::std::collections::BTreeSet<_>>()),
+                    (Some(allowed), None) | (None, Some(allowed)) => Some(allowed.clone()),
+                    (None, None) => None,
+                };
+                let __tier_denied = match (__tier_existing.denied_sources(), __tier_field.denied_sources()) {
+                    (Some(left), Some(right)) => Some(left.union(right).copied().collect::<::std::collections::BTreeSet<_>>()),
+                    (Some(denied), None) | (None, Some(denied)) => Some(denied.clone()),
+                    (None, None) => None,
+                };
+                if let Some(allowed) = __tier_allowed {
+                    __tier_field = __tier_field.allow_sources(allowed);
+                }
+                if let Some(denied) = __tier_denied {
+                    __tier_field = __tier_field.deny_sources(denied);
+                }
+                variant_metadata.push(__tier_field);
+            }
+        }
+        metadata.extend(variant_metadata);
+    };
+
     match representation {
         EnumRepresentation::External => {
             tokens.push(quote! {
@@ -110,11 +138,12 @@ fn push_variant_tokens(
                 {
                     let mut variant_metadata = ::tier::ConfigMetadata::new();
                     #(#variant_tokens)*
-                    metadata.extend(::tier::metadata::prefixed_metadata(
+                    let mut variant_metadata = ::tier::metadata::prefixed_metadata(
                         #content_lit,
                         ::std::vec![],
                         variant_metadata,
-                    ));
+                    );
+                    #merge_security
                 }
             });
         }
@@ -123,7 +152,7 @@ fn push_variant_tokens(
                 {
                     let mut variant_metadata = ::tier::ConfigMetadata::new();
                     #(#variant_tokens)*
-                    metadata.extend(variant_metadata);
+                    #merge_security
                 }
             });
         }

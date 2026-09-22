@@ -188,8 +188,12 @@ pub(super) fn apply_config_migrations(
     string_coercion_paths: &mut BTreeSet<String>,
     report: &mut ConfigReport,
 ) -> Result<(), ConfigError> {
-    let version_path =
-        canonicalize_migration_path(merged, version_path, "configuration version path")?;
+    let version_path = canonicalize_migration_path(
+        merged,
+        version_path,
+        "configuration version path",
+        config_metadata,
+    )?;
     let mut working_version = read_config_version(
         merged,
         &version_path.path,
@@ -266,9 +270,10 @@ fn apply_config_migration(
         } => {
             let from = normalize_migration_registration_path(from)?;
             let to = normalize_migration_registration_path(to)?;
-            let from = canonicalize_migration_path(merged, &from, "migration path")?;
-            let to = canonicalize_migration_path(merged, &to, "migration path")?;
-            if get_value_at_path(merged, &from.path).is_none() {
+            let from =
+                canonicalize_migration_path(merged, &from, "migration path", config_metadata)?;
+            let to = canonicalize_migration_path(merged, &to, "migration path", config_metadata)?;
+            if from.path == to.path || get_value_at_path(merged, &from.path).is_none() {
                 return Ok(());
             }
             reject_array_element_rename(merged, &from.path)?;
@@ -287,6 +292,12 @@ fn apply_config_migration(
             let keep_target = has_explicit_target
                 && matches!(conflict_policy, MigrationConflictPolicy::KeepTarget);
             if !keep_target {
+                let mut replacement_sources = BTreeMap::new();
+                for (path, (_, trace)) in &metadata.sources {
+                    if subtree_suffix(path, &from.path).is_some() {
+                        replacement_sources.entry(trace.kind).or_insert(trace);
+                    }
+                }
                 for (path, (_, trace)) in &metadata.sources {
                     if let Some(suffix) = subtree_suffix(path, &from.path) {
                         super::policy::enforce_source_policy(
@@ -296,9 +307,14 @@ fn apply_config_migration(
                         )?;
                     } else if let Some(suffix) = subtree_suffix(path, &to.path)
                         && get_value_at_path(merged, &format!("{}{suffix}", from.path)).is_none()
-                        && let Some((_, trace)) = metadata.sources.get(&from.path)
                     {
-                        super::policy::enforce_source_policy(path, trace, config_metadata)?;
+                        // Prior migrations can create a parent with no direct
+                        // source entry, or add values below a default parent.
+                        // Every contributor to that replacement subtree must
+                        // be allowed to delete the target's missing descendants.
+                        for trace in replacement_sources.values() {
+                            super::policy::enforce_source_policy(path, trace, config_metadata)?;
+                        }
                     }
                 }
             }
@@ -330,7 +346,8 @@ fn apply_config_migration(
         }
         ConfigMigrationKind::Remove { path } => {
             let path = normalize_migration_registration_path(path)?;
-            let path = canonicalize_migration_path(merged, &path, "migration path")?;
+            let path =
+                canonicalize_migration_path(merged, &path, "migration path", config_metadata)?;
             let array_element = removed_array_element(merged, &path.path);
             if take_value_at_path(merged, &path.path).is_some() {
                 metadata.remap(merged, report, config_metadata, |candidate| {
@@ -400,26 +417,37 @@ fn canonicalize_migration_path(
     value: &Value,
     spec: &MigrationPathSpec,
     kind: &str,
+    metadata: &crate::ConfigMetadata,
 ) -> Result<MigrationPathSpec, ConfigError> {
-    if spec.explicit_array_segments.is_empty() {
-        return Ok(MigrationPathSpec {
-            path: canonicalize_runtime_path(value, &spec.path),
-            explicit_array_segments: BTreeSet::new(),
-        });
-    }
+    let path = if spec.explicit_array_segments.is_empty() {
+        canonicalize_runtime_path(value, &spec.path)
+    } else {
+        try_canonicalize_runtime_path_with_explicit_arrays(
+            value,
+            &spec.path,
+            &spec.explicit_array_segments,
+        )
+        .map_err(|message| ConfigError::MetadataInvalid {
+            path: spec.path.clone(),
+            message: format!("invalid {kind}: {message}"),
+        })?
+    };
+    let (path, explicit_array_segments) = metadata
+        .canonicalize_alias_path_with_array_segments_for_shape(
+            &path,
+            &spec.explicit_array_segments,
+            Some(value),
+        )?;
 
-    let path = try_canonicalize_runtime_path_with_explicit_arrays(
-        value,
-        &spec.path,
-        &spec.explicit_array_segments,
-    )
-    .map_err(|message| ConfigError::MetadataInvalid {
-        path: spec.path.clone(),
-        message: format!("invalid {kind}: {message}"),
-    })?;
+    let path =
+        try_canonicalize_runtime_path_with_explicit_arrays(value, &path, &explicit_array_segments)
+            .map_err(|message| ConfigError::MetadataInvalid {
+                path: spec.path.clone(),
+                message: format!("invalid {kind}: {message}"),
+            })?;
     Ok(MigrationPathSpec {
         path,
-        explicit_array_segments: spec.explicit_array_segments.clone(),
+        explicit_array_segments,
     })
 }
 

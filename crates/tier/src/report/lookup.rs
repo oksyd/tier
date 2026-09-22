@@ -18,7 +18,21 @@ pub(super) fn normalize_lookup_path(
 ) -> Option<String> {
     let segments = parse_external_path(path).ok()?;
     let normalized = render_external_path(&segments);
-    let runtime = canonicalize_runtime_lookup_path(final_value, &segments)?;
+    let runtime = match canonicalize_runtime_lookup_path(final_value, &segments) {
+        Some(runtime) => runtime,
+        None => {
+            // A later source can replace an object with an array. Its earlier
+            // field traces remain valid history even though the final shape no
+            // longer accepts those paths. Keep explicit bracket syntax strict
+            // so it cannot address numeric object keys.
+            let aliased = canonicalize_path_with_aliases(&normalized, alias_overrides);
+            return (segments
+                .iter()
+                .all(|segment| matches!(segment, ExternalPathSegment::Field(_)))
+                && traces.contains_key(&aliased))
+            .then_some(aliased);
+        }
+    };
     let aliased_runtime = canonicalize_path_with_aliases(&runtime, alias_overrides);
     if traces.contains_key(&aliased_runtime)
         || get_value_at_path(final_value, &aliased_runtime).is_some()

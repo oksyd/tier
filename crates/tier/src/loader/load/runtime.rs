@@ -85,13 +85,18 @@ pub(super) fn run_normalizers(
 
         *metadata = canonicalize_metadata_against_value(metadata, &after)?;
         runtime_metadata.alias_overrides = metadata.alias_lookup_overrides()?;
-        runtime_metadata
-            .secret_paths
-            .extend(canonicalize_secret_paths_against_value(
-                pending_secret_paths,
+        for spec in pending_secret_paths {
+            // Registrations were validated against the input layers. A normalizer
+            // may change a container's shape, making an old secret path inapplicable
+            // to the new value; retain that path to protect historical traces.
+            if let Ok(paths) = canonicalize_secret_paths_against_value(
+                &BTreeSet::from([spec.clone()]),
                 &after,
                 metadata,
-            )?);
+            ) {
+                runtime_metadata.secret_paths.extend(paths);
+            }
+        }
 
         let trace = SourceTrace::new(SourceKind::Normalization, normalizer.name.clone());
         report.record_source(trace.clone());

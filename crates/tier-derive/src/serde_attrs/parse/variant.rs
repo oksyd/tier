@@ -5,7 +5,7 @@ use crate::syntax::{
     consume_unused_meta, parse_flag, parse_string_value, reject_duplicate_flag, unraw,
 };
 
-use super::rename_meta::parse_rename_meta;
+use super::rename_meta::{parse_rename_all_meta, parse_rename_meta};
 
 pub(crate) fn parse_serde_variant_attrs(
     attributes: &[Attribute],
@@ -17,6 +17,8 @@ pub(crate) fn parse_serde_variant_attrs(
     let mut rename_deserialize = None;
     let mut aliases = Vec::new();
     let mut skip_metadata = false;
+    let mut rename_all_serialize = None;
+    let mut rename_all_deserialize = None;
 
     for attribute in attributes {
         if !attribute.path().is_ident("serde") {
@@ -26,6 +28,15 @@ pub(crate) fn parse_serde_variant_attrs(
         attribute.parse_nested_meta(|meta| {
             if meta.path.is_ident("rename") {
                 parse_rename_meta(meta, &mut rename_serialize, &mut rename_deserialize)?;
+                return Ok(());
+            }
+            if meta.path.is_ident("rename_all") {
+                parse_rename_all_meta(
+                    meta,
+                    &mut rename_all_serialize,
+                    &mut rename_all_deserialize,
+                    "rename_all",
+                )?;
                 return Ok(());
             }
             if meta.path.is_ident("alias") {
@@ -74,6 +85,8 @@ pub(crate) fn parse_serde_variant_attrs(
     aliases.dedup();
 
     Ok(SerdeVariantAttrs {
+        rename_all_serialize,
+        rename_all_deserialize,
         canonical_name,
         aliases,
         skip_metadata,

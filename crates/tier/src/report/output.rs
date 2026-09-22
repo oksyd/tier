@@ -38,7 +38,9 @@ impl ConfigReport {
             .traces
             .keys()
             .filter_map(|path| {
-                self.explain(path).map(|explanation| {
+                // Trace keys are already canonical historical paths. Re-resolving
+                // them against the final shape can drop or redirect old entries.
+                self.explain_recorded_path(path).map(|explanation| {
                     (
                         path.clone(),
                         TraceAudit {
